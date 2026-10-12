@@ -45,3 +45,15 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npm audit --omit=dev --audit-level=high
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the production Dockerfile without provider credentials
+        run: docker build --tag property-management-platform:check .
+      - name: Check production container startup and access protection
+        run: node scripts/check-container.mjs

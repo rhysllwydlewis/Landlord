@@ -2,10 +2,8 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-# Managed environment builds: supply --secret id=proxy_ca,src="$CODEX_PROXY_CERT".
-# Other hosts: omit the optional secret; standard system CA validation remains enabled.
-RUN --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca npm ci --strict-ssl=true; else npm ci --strict-ssl=true; fi
+# Keep the production recipe compatible with hosts that reject secret mounts.
+RUN npm ci --strict-ssl=true
 COPY . .
 ARG DATABASE_URL=postgresql://build:unused@localhost:5432/build
 ARG NEXT_PUBLIC_PRODUCT_NAME="Property Management Platform"
