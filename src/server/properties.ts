@@ -80,6 +80,7 @@ export async function updateUnit(ctx: Context, id: string, raw: unknown) {
     .omit({ propertyId: true })
     .partial()
     .extend({
+      type: unitInput.shape.type.removeDefault().optional(),
       archive: z.boolean().optional(),
     })
     .strict()

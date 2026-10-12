@@ -12,14 +12,36 @@ export const settingsInput = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
     organisationName: z.string().trim().min(2).max(120).optional(),
-    profile: profilePreferencesSchema
-      .omit({ email: true })
-      .partial()
+    profile: z
+      .object({
+        phone: profilePreferencesSchema.shape.phone.removeDefault().optional(),
+        preferredContact: profilePreferencesSchema.shape.preferredContact
+          .removeDefault()
+          .optional(),
+        accessibilityNeeds: profilePreferencesSchema.shape.accessibilityNeeds
+          .removeDefault()
+          .optional(),
+      })
       .strict()
       .optional(),
     notificationPreferences: z.object({ email: z.boolean() }).optional(),
-    organisationSettings: organisationSettingsSchema
-      .partial()
+    organisationSettings: z
+      .object({
+        emergencyContact: organisationSettingsSchema.shape.emergencyContact
+          .removeDefault()
+          .optional(),
+        emergencyGuidance: organisationSettingsSchema.shape.emergencyGuidance
+          .removeDefault()
+          .optional(),
+        complianceReminderDays:
+          organisationSettingsSchema.shape.complianceReminderDays
+            .removeDefault()
+            .optional(),
+        documentReminderDays:
+          organisationSettingsSchema.shape.documentReminderDays
+            .removeDefault()
+            .optional(),
+      })
       .strict()
       .optional(),
     deletionRequest: z.boolean().optional(),

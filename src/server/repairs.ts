@@ -64,6 +64,12 @@ export async function getRepair(ctx: Context, id: string) {
       documents: {
         where: {
           archivedAt: null,
+          ...(ctx.role === "STAFF" &&
+          !ctx.permissions.some((p) =>
+            ["documents:read", "documents:write"].includes(p),
+          )
+            ? { id: { in: [] as string[] } }
+            : {}),
           ...(ctx.role === "TENANT"
             ? {
                 visibility: "shared",

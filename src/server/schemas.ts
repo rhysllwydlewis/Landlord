@@ -51,11 +51,26 @@ export const propertySchema = z.object({
   portfolioId: id.nullable().optional(),
   ownerId: id.nullable().optional(),
 });
+// Zod 4 applies defaults inside optional fields. PATCH validation must remove
+// creation defaults so omitted values never overwrite existing records.
+export const propertyPatchSchema = propertySchema.partial().extend({
+  jurisdiction: propertySchema.shape.jurisdiction.removeDefault().optional(),
+  bedrooms: propertySchema.shape.bedrooms.removeDefault().optional(),
+  bathrooms: propertySchema.shape.bathrooms.removeDefault().optional(),
+  furnishing: propertySchema.shape.furnishing.removeDefault().optional(),
+  notes: propertySchema.shape.notes.removeDefault().optional(),
+});
 export const tenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.email().transform((s) => s.toLowerCase()),
   phone: z.string().max(30).default(""),
 });
+export const tenantPatchSchema = tenantSchema
+  .partial()
+  .omit({ email: true })
+  .extend({
+    phone: tenantSchema.shape.phone.removeDefault().optional(),
+  });
 export const tenancySchema = z
   .object({
     propertyId: id,

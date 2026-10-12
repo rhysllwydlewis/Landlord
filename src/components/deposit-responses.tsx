@@ -121,13 +121,11 @@ export function DepositResponses({
               body: f.get("body"),
               idempotencyKey: key.current,
             });
-            const current = (await requestJson(
-              `/api/deposits/${id}/responses`,
-              "GET",
-            )) as Row;
             key.current = null;
-            setRecord(current);
             setMessage("Your deposit response has been recorded.");
+            // A failed history refresh must not turn an acknowledged write into
+            // a failed submission or reuse its key for the next response.
+            await refresh();
             return true;
           }}
           className="record-form"

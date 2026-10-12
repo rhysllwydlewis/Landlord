@@ -14,7 +14,9 @@ import { checkLimit, entitlement } from "./entitlements";
 import { invariant } from "./errors";
 import {
   propertySchema,
+  propertyPatchSchema,
   tenantSchema,
+  tenantPatchSchema,
   tenancySchema,
   expenseSchema,
   complianceSchema,
@@ -1159,6 +1161,8 @@ export async function createResource(
           "New tenant feedback",
           "/app/feedback",
           `feedback:${r.id}`,
+          "feedback",
+          r.id,
         );
       return { id: r.id };
     }
@@ -1196,7 +1200,7 @@ export async function updateResource(
         });
       });
     } else {
-      const data = propertySchema.partial().parse(raw);
+      const data = propertyPatchSchema.parse(raw);
       await validatePropertyChanges(ctx, data);
       await db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${id} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
@@ -1237,7 +1241,7 @@ export async function updateResource(
     invariant(t, 404, "Tenant not found.");
     await db.tenant.update({
       where: { id },
-      data: tenantSchema.partial().omit({ email: true }).parse(raw),
+      data: tenantPatchSchema.parse(raw),
     });
     return { id };
   }

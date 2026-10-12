@@ -2,7 +2,7 @@ import { Resend } from "resend";
 import { db } from "./db";
 import { generateRent } from "./ledger";
 import { outstanding, utcDay } from "@/lib/calculations";
-import { notify, managerIds } from "./notifications";
+import { notify, managerIds, canViewNotification } from "./notifications";
 import type { Context } from "./context";
 import { invariant } from "./errors";
 import { organisationSettings } from "@/lib/workspace-settings";
@@ -148,16 +148,21 @@ export async function schedule(now = new Date(), organisationId?: string) {
     }
   }
 }
-export async function processJobs() {
+export async function processJobs(organisationId?: string) {
   await db.backgroundJob.updateMany({
     where: {
       status: "processing",
       lockedAt: { lt: new Date(Date.now() - 15 * 60000) },
+      ...(organisationId ? { organisationId } : {}),
     },
     data: { status: "queued", lockedAt: null },
   });
   const jobs = await db.backgroundJob.findMany({
-    where: { status: "queued", runAt: { lte: new Date() } },
+    where: {
+      status: "queued",
+      runAt: { lte: new Date() },
+      ...(organisationId ? { organisationId } : {}),
+    },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
@@ -189,82 +194,13 @@ export async function processJobs() {
             organisation: { status: "active" },
           },
         });
-        let allowed = !!member;
-        if (member && payload.resourceType === "repair") {
-          const scope =
-            member.role === "TENANT"
-              ? {
-                  OR: [
-                    { reporter: { userId: payload.userId } },
-                    {
-                      grants: { some: { tenant: { userId: payload.userId } } },
-                    },
-                  ],
-                }
-              : member.role === "STAFF" && member.propertyIds.length
-                ? { propertyId: { in: member.propertyIds } }
-                : {};
-          allowed =
-            (member.role === "OWNER" ||
-              member.role === "TENANT" ||
-              (member.role === "STAFF" &&
-                member.permissions.some((p) =>
-                  ["repairs:read", "repairs:write"].includes(p),
-                ))) &&
-            !!(await db.repair.findFirst({
-              where: {
-                id: payload.resourceId,
-                organisationId: job.organisationId,
-                ...scope,
-              },
-            }));
-        }
-        if (member && payload.resourceType === "document") {
-          allowed =
-            (member.role === "OWNER" ||
-              member.role === "TENANT" ||
-              (member.role === "STAFF" &&
-                member.permissions.some((p) =>
-                  ["documents:read", "documents:write"].includes(p),
-                )) ||
-              (member.role === "STAKEHOLDER" &&
-                member.permissions.includes("documents:read"))) &&
-            !!(await db.document.findFirst({
-              where: {
-                id: payload.resourceId,
-                organisationId: job.organisationId,
-                archivedAt: null,
-                ...(member.role === "TENANT"
-                  ? {
-                      visibility: "shared",
-                      grants: { some: { tenant: { userId: payload.userId } } },
-                      OR: [
-                        { repairId: null },
-                        {
-                          repair: {
-                            OR: [
-                              { reporter: { userId: payload.userId } },
-                              {
-                                grants: {
-                                  some: { tenant: { userId: payload.userId } },
-                                },
-                              },
-                            ],
-                          },
-                        },
-                      ],
-                    }
-                  : member.role === "STAKEHOLDER"
-                    ? {
-                        ownerVisible: true,
-                        propertyId: { in: member.propertyIds },
-                      }
-                    : member.role === "STAFF" && member.propertyIds.length
-                      ? { propertyId: { in: member.propertyIds } }
-                      : {}),
-              },
-            }));
-        }
+        const allowed =
+          !!member &&
+          (await canViewNotification(member, {
+            resourceType: payload.resourceType,
+            resourceId: payload.resourceId,
+            dedupeKey: job.dedupeKey,
+          }));
         if (!allowed) {
           await db.backgroundJob.update({
             where: { id: job.id },

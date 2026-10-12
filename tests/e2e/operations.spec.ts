@@ -653,6 +653,72 @@ test("joint tenants can respond privately to deposit proposals and must review c
   expect(
     (await PDFDocument.load(await evidence.body())).getPageCount(),
   ).toBeGreaterThan(0);
+  let releasePost!: () => void;
+  const postGate = new Promise<void>((resolve) => {
+    releasePost = resolve;
+  });
+  let failHistoryRefresh = true;
+  await tenant.page.route(
+    `**/api/deposits/${deposit.id}/responses`,
+    async (route) => {
+      if (route.request().method() === "POST") await postGate;
+      if (route.request().method() === "GET" && failHistoryRefresh) {
+        failHistoryRefresh = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "History temporarily unavailable." }),
+        });
+      } else await route.continue();
+    },
+  );
+  const responseField = tenant.page.getByLabel("Your deposit response");
+  await responseField.fill(
+    "This response must remain recorded if the history refresh fails.",
+  );
+  await tenant.page
+    .getByRole("button", { name: "Send deposit response" })
+    .click();
+  try {
+    await expect(responseField).toBeDisabled();
+    await expect(
+      tenant.page.getByRole("button", { name: "Send deposit response" }),
+    ).toBeDisabled();
+  } finally {
+    releasePost();
+  }
+  await expect(
+    tenant.page.getByText("Your deposit response has been recorded.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    tenant.page
+      .getByRole("alert")
+      .filter({ hasText: "History temporarily unavailable." }),
+  ).toBeVisible();
+  await expect(responseField).toHaveValue("");
+  await responseField.fill(
+    "A new response after the acknowledged submission uses a new key.",
+  );
+  await tenant.page
+    .getByRole("button", { name: "Send deposit response" })
+    .click();
+  await expect(
+    tenant.page.getByText(
+      "A new response after the acknowledged submission uses a new key.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(
+    await db.depositResponse.count({
+      where: {
+        depositId: deposit.id,
+        body: "This response must remain recorded if the history refresh fails.",
+      },
+    }),
+  ).toBe(1);
+  await tenant.page.unroute(`**/api/deposits/${deposit.id}/responses`);
   await withoutOperations(async () => {
     await tenant.page.goto(`/app/deposits?propertyId=${property.id}`);
     await tenant.page

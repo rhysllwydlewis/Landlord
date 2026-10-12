@@ -45,7 +45,7 @@ export function ClientForm({
           }
         }}
       >
-        <fieldset className="form-controls" disabled={!hydrated}>
+        <fieldset className="form-controls" disabled={!hydrated || pending}>
           {children}
         </fieldset>
         {error && (

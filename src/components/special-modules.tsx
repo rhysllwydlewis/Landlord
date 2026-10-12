@@ -16,7 +16,7 @@ import { permit, type Context } from "@/server/context";
 import { db } from "@/server/db";
 import { options, dashboard, can } from "@/server/dashboard";
 import { financialReport } from "@/server/reports";
-import { repairWhere } from "@/server/repairs";
+import { canViewNotification } from "@/server/notifications";
 import { PageHeader, Panel, Status, Empty } from "./ui";
 import {
   SettingsForm,
@@ -313,16 +313,7 @@ export async function SpecialModule({
     });
     const notifications = [];
     for (const n of raw) {
-      if (n.resourceType === "repair") {
-        if (
-          ctx.role === "TENANT" &&
-          !(await db.repair.findFirst({
-            where: { ...repairWhere(ctx), id: n.resourceId || "" },
-          }))
-        )
-          continue;
-        if (ctx.role === "STAFF" && !can(ctx, "repairs")) continue;
-      }
+      if (!(await canViewNotification(ctx, n))) continue;
       notifications.push(n);
     }
     return (
