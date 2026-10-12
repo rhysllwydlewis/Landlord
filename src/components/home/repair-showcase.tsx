@@ -1,4 +1,5 @@
 "use client";
+import { useHydrated } from "../use-hydrated";
 import { useState } from "react";
 import {
   Check,
@@ -10,6 +11,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 export function RepairShowcase() {
+  const hydrated = useHydrated();
   const [tenant, setTenant] = useState(true);
   return (
     <div className="home-repair-demo">
@@ -20,6 +22,7 @@ export function RepairShowcase() {
       >
         <button
           type="button"
+          disabled={!hydrated}
           aria-pressed={tenant}
           onClick={() => setTenant(true)}
         >
@@ -28,6 +31,7 @@ export function RepairShowcase() {
         </button>
         <button
           type="button"
+          disabled={!hydrated}
           aria-pressed={!tenant}
           onClick={() => setTenant(false)}
         >

@@ -8,7 +8,7 @@ export function HomeMotion() {
     )
       return;
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const animations = new Set<Animation>();
+    const animations = new Map<Element, Animation>();
     const seen = new WeakSet<Element>();
     let observer: IntersectionObserver | undefined;
     const cancel = () => {
@@ -17,6 +17,7 @@ export function HomeMotion() {
     };
     const configure = () => {
       observer?.disconnect();
+      observer = undefined;
       if (preference.matches) {
         cancel();
         return;
@@ -38,18 +39,26 @@ export function HomeMotion() {
               entry.target.contains(document.activeElement)
             )
               continue;
+            // Interactive sections fade without moving: cancelling on focus
+            // must not shift a button between pointer-down and pointer-up.
+            const distance = entry.target.querySelector(
+              "a, button, input, select, textarea, summary, [tabindex], [contenteditable]",
+            )
+              ? 0
+              : 26;
             const animation = entry.target.animate(
               [
-                { opacity: 0, transform: "translateY(26px)" },
+                { opacity: 0, transform: `translateY(${distance}px)` },
                 { opacity: 1, transform: "translateY(0)" },
               ],
               { duration: 850, easing: "cubic-bezier(.2,.7,.2,1)" },
             );
-            animations.add(animation);
-            void animation.finished.then(
-              () => animations.delete(animation),
-              () => animations.delete(animation),
-            );
+            animations.set(entry.target, animation);
+            const forget = () => {
+              if (animations.get(entry.target) === animation)
+                animations.delete(entry.target);
+            };
+            void animation.finished.then(forget, forget);
           }
         },
         { threshold: 0.12 },
@@ -61,12 +70,24 @@ export function HomeMotion() {
           if (!seen.has(element)) current.observe(element);
         });
     };
+    const preserveFocus = (event: FocusEvent) => {
+      if (!(event.target instanceof Node)) return;
+      for (const [element, animation] of animations) {
+        if (element.contains(event.target)) {
+          animation.cancel();
+          animations.delete(element);
+        }
+      }
+    };
+    document.addEventListener("focusin", preserveFocus);
     preference.addEventListener("change", configure);
     configure();
     return () => {
       observer?.disconnect();
+      observer = undefined;
       cancel();
       preference.removeEventListener("change", configure);
+      document.removeEventListener("focusin", preserveFocus);
     };
   }, []);
   return null;

@@ -4,6 +4,7 @@
 
 - Better Auth owns password hashing, signed secure sessions, verification/reset tokens, authenticator checks and lockouts. Password reset revokes existing sessions. Production cookies are Secure, HttpOnly and SameSite.
 - Request handlers authenticate verified accounts and active organisation membership. IDs never substitute for organisation checks. Staff write permissions differ from read permissions; tenants cannot write payments or change tenancy status.
+- Shared client forms keep native fields disabled and the form inert until hydration and declare POST, preventing a native GET submission from putting passwords or record values in URLs. A JavaScript-disabled state explains the requirement.
 - Mutations check the configured request Origin and reject cross-site requests. Better Auth applies its own origin/CSRF protection. Authentication and application endpoints use database-backed rate limits; development authentication thresholds are higher for repeatable local testing.
 - Repair and document permissions are enforced in SQL predicates, response projections and downloads. Private notes, comments, costs and attachments are excluded from tenant responses. Read-only owners need explicit financial/document permission and selected property access.
 - React renders user content as text. No uploaded HTML/SVG or raw user HTML is executed. Uploads allow PDF/PNG/JPEG/WebP, verify content signatures, enforce 10 MB/file and plan storage limits, store random object keys outside public storage, and use authenticated no-cache downloads.
@@ -33,6 +34,8 @@ Define the controller, lawful bases, processor contracts, retention periods by r
 Playwright traces can contain session cookies, development passwords, emails and verification links. They stay local and ignored. Do not publish traces without redaction. The seed uses generated local-only credentials and `.example.test` addresses. Production seeding is prohibited.
 
 ## Record lookup and recipient review
+
+Restricted staff queries scope nested tenancy history and selection IDs as well as the parent tenant record. Re-inviting inactive staff or stakeholders applies the new grants; an invitation cannot overwrite an already-active manager's grants. Restricted owner dashboards use compliance categories rather than private free-form titles.
 
 Single-record checks intersect the requested identifier with organisation and role scopes. Scope filters must never overwrite a supplied identifier. Regression tests cover restricted staff attempting a different organisation's property update, tenants attempting document uploads against another tenancy, and read-only owners supplying unauthorised property filters.
 

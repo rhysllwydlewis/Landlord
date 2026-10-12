@@ -256,7 +256,10 @@ test("scroll motion follows preference changes and preserves focused controls", 
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
       this.setAttribute("data-animated", "true");
-      return animate.apply(this, args);
+      const animation = animate.apply(this, args);
+      // Keep the entrance active until an event cancels it, independent of CI speed.
+      animation.pause();
+      return animation;
     };
   });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -274,6 +277,21 @@ test("scroll motion follows preference changes and preserves focused controls", 
   await repair.scrollIntoViewIfNeeded();
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(repair).toHaveAttribute("data-animated", "true");
+  expect(
+    await repair.evaluate((el) => el.getAnimations().length),
+  ).toBeGreaterThan(0);
+  const control = repair.getByRole("button", {
+    name: "Tenant view",
+    exact: true,
+  });
+  const beforeFocus = await control.boundingBox();
+  await control.focus();
+  const afterFocus = await control.boundingBox();
+  expect(afterFocus!.y).toBeCloseTo(beforeFocus!.y, 1);
+  expect(await repair.evaluate((el) => el.getAnimations().length)).toBe(0);
+  await expect(
+    repair.getByRole("button", { name: "Tenant view", exact: true }),
+  ).toBeFocused();
   await page.emulateMedia({ reducedMotion: "reduce" });
   const finalSection = page.locator(".home-final-cta");
   await finalSection
@@ -290,4 +308,37 @@ test("scroll motion follows preference changes and preserves focused controls", 
       ),
   );
   await expect(finalSection).not.toHaveAttribute("data-animated", "true");
+});
+
+test("preview controls wait for their handlers when scripts load slowly", async ({
+  page,
+}) => {
+  let release!: () => void;
+  const scripts = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/_next/static/**", async (route) => {
+    if (route.request().resourceType() === "script") await scripts;
+    await route.continue();
+  });
+  try {
+    await page.goto("/", { waitUntil: "commit" });
+    const rent = page.getByRole("tab", { name: "Rent", exact: true });
+    const landlord = page.getByRole("button", {
+      name: "Landlord view",
+      exact: true,
+    });
+    await expect(rent).toBeDisabled();
+    await expect(landlord).toBeDisabled();
+    release();
+    await expect(rent).toBeEnabled();
+    await rent.click();
+    await expect(page.getByRole("tabpanel")).toContainText(
+      "Every payment has its place.",
+    );
+    await landlord.click();
+    await expect(page.getByText("Internal note · landlord only")).toBeVisible();
+  } finally {
+    release();
+  }
 });

@@ -1,4 +1,5 @@
 "use client";
+import { useHydrated } from "../use-hydrated";
 import Image from "next/image";
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import {
@@ -368,6 +369,7 @@ function TourPanel({ feature }: { feature: number }) {
   );
 }
 export function FeatureTour() {
+  const hydrated = useHydrated();
   const [selected, setSelected] = useState(0);
   const id = useId();
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
@@ -401,6 +403,7 @@ export function FeatureTour() {
               buttons.current[i] = node;
             }}
             type="button"
+            disabled={!hydrated}
             role="tab"
             id={`${id}-tab-${i}`}
             aria-controls={`${id}-panel-${i}`}

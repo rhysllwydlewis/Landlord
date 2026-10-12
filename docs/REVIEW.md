@@ -32,7 +32,10 @@ Corrections include:
 - Apply the new invitation's permissions and property restrictions when reactivating an inactive staff/stakeholder membership. Reject invitations that would replace an already-active manager's permissions; additional tenant-record invitations remain supported.
 - Redact free-form compliance titles in the restricted owner dashboard, consistent with the compliance list.
 - Replace the mobile homepage menu with native disclosure navigation, fix desktop-resize and closed-menu Escape behaviour, and close on outside clicks or focus leaving the header.
-- Preserve high-contrast heading text, keep every tab linked to a persistent labelled panel, honour changing motion preferences, and skip entrance animation on focused controls or unsupported browsers.
+- Preserve high-contrast heading text, keep every tab linked to a persistent labelled panel, honour changing motion preferences, and skip entrance animation on focused controls or unsupported browsers, and cancel an active entrance when focus enters. Interactive sections fade without positional movement, so cancellation cannot shift a clicked button away from the pointer.
+- Make shared secure forms inert with disabled native fields until their handlers are attached and enforce POST, preventing default GET submissions from placing passwords in URLs. Provide an explicit JavaScript-required message when scripts are disabled.
+- Keep JavaScript-only preview controls disabled until hydration completes, preventing lost initial clicks on slower connections.
+- Improve sign-in/account text contrast and add a focusable main landmark for the shared skip link.
 - Improve narrow-screen caption contrast, use configured branding in homepage metadata and the shared footer, make skip/hash destinations focusable, and remove preview copy referring to a nonexistent photograph.
 
 Regression tests reproduced the access leaks, stale staff grants, broken menu/contrast behaviour and incomplete tab associations before their fixes. Final verification totals and CI evidence are recorded on the PR. The existing implementation and launch limitations still apply.

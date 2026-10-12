@@ -23,7 +23,7 @@ export function AuthForm({
     ? `/invite?token=${encodeURIComponent(invite)}`
     : "/onboarding";
   return (
-    <div className="auth-page">
+    <main id="main" tabIndex={-1} className="auth-page">
       <Link href="/" className="brand auth-brand">
         <span className="brand-icon">
           <Building2 size={23} />
@@ -221,6 +221,6 @@ export function AuthForm({
         Secure sign-in · <Link href="/privacy">Privacy</Link> ·{" "}
         <Link href="/help">Help & support</Link>
       </footer>
-    </div>
+    </main>
   );
 }
