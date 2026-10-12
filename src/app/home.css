@@ -169,14 +169,17 @@
   display: none;
   align-items: center;
   justify-content: center;
-  width: 35px;
-  height: 35px;
+  width: 44px;
+  height: 44px;
+  list-style: none;
+  cursor: pointer;
   border: 0;
   border-radius: 9px;
   background: transparent;
   color: var(--home-ink);
 }
 .premium-site .home-mobile-nav {
+  display: none;
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
@@ -583,7 +586,7 @@
   left: 50%;
   transform: translateX(-50%);
   font-size: 6px;
-  color: #77887c;
+  color: #5b6e61;
 }
 .premium-site .home-demo-repair-row {
   display: flex;
@@ -1791,7 +1794,7 @@
 .premium-site .home-phone-note span {
   display: block;
   font-size: 9px;
-  color: #6b7d61;
+  color: #354c38;
   margin-top: 4px;
 }
 .premium-site .home-phone-caption {
@@ -3066,7 +3069,7 @@
     gap: 0;
   }
   .premium-site .home-menu-button {
-    width: 29px;
+    width: 44px;
   }
   .premium-site .home-hero h1 {
     font-size: 39px;
@@ -3136,5 +3139,64 @@
   }
   .premium-site .home-repair-ticket.glass {
     background: #f9fcf8;
+  }
+}
+
+/* Native navigation remains available without client-side JavaScript. */
+.premium-site .home-mobile-menu {
+  display: none;
+}
+.premium-site .home-menu-button::-webkit-details-marker {
+  display: none;
+}
+.premium-site .home-menu-button::marker {
+  content: "";
+}
+.premium-site .home-menu-button:focus-visible {
+  outline: 2px solid var(--home-accent);
+  outline-offset: 3px;
+}
+.premium-site .home-menu-close,
+.premium-site .home-mobile-menu[open] .home-menu-open {
+  display: none;
+}
+.premium-site .home-mobile-menu[open] .home-menu-close {
+  display: block;
+}
+.premium-site .home-tour-panel[hidden] {
+  display: none;
+}
+.premium-site .home-brand > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .premium-site .home-mobile-menu {
+    display: block;
+  }
+  .premium-site .home-mobile-menu[open] .home-mobile-nav {
+    display: block;
+  }
+}
+@media (forced-colors: active) {
+  .premium-site .home-hero h1 span {
+    background: none;
+    color: CanvasText;
+    -webkit-text-fill-color: currentColor;
+  }
+  .premium-site .glass {
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+  .premium-site .home-button,
+  .premium-site .home-tour-tabs button,
+  .premium-site .home-repair-view-toggle button {
+    border: 1px solid ButtonText;
+  }
+  .premium-site .home-tour-tabs button[aria-selected="true"],
+  .premium-site .home-repair-view-toggle button[aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -4px;
   }
 }

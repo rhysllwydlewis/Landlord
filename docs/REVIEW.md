@@ -21,3 +21,18 @@ Reviewed the draft implementation against access isolation, repair privacy, fina
 Validation includes strict TypeScript, lint, unit tests, PostgreSQL integration tests, browser journeys, a production build and the production dependency audit. The PR records the final results. Stripe contract tests use offline provider fixtures and the real SDK's signature verification; no provider account or money was involved.
 
 The full master brief is still unfinished. [IMPLEMENTATION.md](IMPLEMENTATION.md) lists specific missing workflows and launch requirements. No external delivery, regulated rent collection, legal compliance certification, public deployment or production-readiness claim is made by this review. Deferred financial adjustments, deposit settlement, advanced workflows, GDPR operations and provider validation remain material launch blockers.
+
+## Additional manual review
+
+The second pass read the homepage source, styles and interaction tests line by line, and inspected authentication/invitations, organisation scopes, repair/document permissions, the ledger, reminders, imports, reports and related routes. This is a targeted engineering review, not a claim that every repository line or every possible defect has been independently audited.
+
+Corrections include:
+
+- Filter nested tenancy history and selector IDs as well as top-level tenant records for property-restricted staff.
+- Apply the new invitation's permissions and property restrictions when reactivating an inactive staff/stakeholder membership. Reject invitations that would replace an already-active manager's permissions; additional tenant-record invitations remain supported.
+- Redact free-form compliance titles in the restricted owner dashboard, consistent with the compliance list.
+- Replace the mobile homepage menu with native disclosure navigation, fix desktop-resize and closed-menu Escape behaviour, and close on outside clicks or focus leaving the header.
+- Preserve high-contrast heading text, keep every tab linked to a persistent labelled panel, honour changing motion preferences, and skip entrance animation on focused controls or unsupported browsers.
+- Improve narrow-screen caption contrast, use configured branding in homepage metadata and the shared footer, make skip/hash destinations focusable, and remove preview copy referring to a nonexistent photograph.
+
+Regression tests reproduced the access leaks, stale staff grants, broken menu/contrast behaviour and incomplete tab associations before their fixes. Final verification totals and CI evidence are recorded on the PR. The existing implementation and launch limitations still apply.

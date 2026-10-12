@@ -273,27 +273,29 @@ function TourPanel({ feature }: { feature: number }) {
           </div>
           <Wrench size={20} />
         </div>
-        {[
+        {(
           [
-            "Kitchen tap leaking",
-            "12 Willow Road · Tenant reported",
-            "In progress",
-            false,
-          ],
-          [
-            "Boiler service",
-            "8 Park Avenue · Landlord created",
-            "Under review",
-            true,
-          ],
-          [
-            "Window seal replaced",
-            "12 Willow Road · Tenant reported",
-            "Resolved",
-            false,
-          ],
-        ].map(([title, detail, status, privateRecord]) => (
-          <div key={String(title)} className="home-tour-repair">
+            [
+              "Kitchen tap leaking",
+              "12 Willow Road · Tenant reported",
+              "In progress",
+              false,
+            ],
+            [
+              "Boiler service",
+              "8 Park Avenue · Landlord created",
+              "Under review",
+              true,
+            ],
+            [
+              "Window seal replaced",
+              "12 Willow Road · Tenant reported",
+              "Resolved",
+              false,
+            ],
+          ] as const
+        ).map(([title, detail, status, privateRecord]) => (
+          <div key={title} className="home-tour-repair">
             <span className="home-demo-repair-icon">
               <Wrench size={15} />
             </span>
@@ -369,7 +371,6 @@ export function FeatureTour() {
   const [selected, setSelected] = useState(0);
   const id = useId();
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
-  const feature = features[selected];
   function keyboard(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const next =
       event.key === "ArrowRight"
@@ -399,9 +400,10 @@ export function FeatureTour() {
             ref={(node) => {
               buttons.current[i] = node;
             }}
+            type="button"
             role="tab"
             id={`${id}-tab-${i}`}
-            aria-controls={selected === i ? `${id}-panel-${i}` : undefined}
+            aria-controls={`${id}-panel-${i}`}
             aria-selected={selected === i}
             tabIndex={selected === i ? 0 : -1}
             onClick={() => setSelected(i)}
@@ -412,36 +414,39 @@ export function FeatureTour() {
           </button>
         ))}
       </div>
-      <div
-        className="home-tour-panel"
-        key={selected}
-        id={`${id}-panel-${selected}`}
-        role="tabpanel"
-        aria-labelledby={`${id}-tab-${selected}`}
-        tabIndex={0}
-      >
-        <div className="home-tour-copy">
-          <span className="home-eyebrow">{feature.eyebrow}</span>
-          <h3>{feature.title}</h3>
-          <p>{feature.text}</p>
-          <div className="home-tour-benefit">
-            <Check size={15} />
-            {feature.benefit}
+      {features.map((feature, i) => (
+        <div
+          className="home-tour-panel"
+          key={feature.label}
+          hidden={selected !== i}
+          id={`${id}-panel-${i}`}
+          role="tabpanel"
+          aria-labelledby={`${id}-tab-${i}`}
+          tabIndex={0}
+        >
+          <div className="home-tour-copy">
+            <span className="home-eyebrow">{feature.eyebrow}</span>
+            <h3>{feature.title}</h3>
+            <p>{feature.text}</p>
+            <div className="home-tour-benefit">
+              <Check size={15} />
+              {feature.benefit}
+            </div>
+          </div>
+          <div className="home-tour-preview glass">
+            <div className="home-tour-window-top">
+              <span className="home-window-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span>Illustrative preview · sample data</span>
+              <MoreHorizontal size={16} />
+            </div>
+            <TourPanel feature={i} />
           </div>
         </div>
-        <div className="home-tour-preview glass">
-          <div className="home-tour-window-top">
-            <span className="home-window-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span>Illustrative preview · sample data</span>
-            <MoreHorizontal size={16} />
-          </div>
-          <TourPanel feature={selected} />
-        </div>
-      </div>
+      ))}
     </div>
   );
 }

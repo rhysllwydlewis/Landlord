@@ -25,9 +25,10 @@ import { PublicLayout } from "@/components/public";
 import { HomeMotion } from "@/components/home/motion";
 import { ProductPreview, FeatureTour } from "@/components/home/product-preview";
 import { RepairShowcase } from "@/components/home/repair-showcase";
+import { brand } from "@/lib/config";
 import "./home.css";
 export const metadata: Metadata = {
-  title: "A clearer view of your rental business",
+  title: `${brand.name} — A clearer view of your rental business`,
   description:
     "Bring properties, tenants, rent and repairs together in one thoughtfully designed workspace for UK landlords. Explore the platform and create your account.",
 };
@@ -85,7 +86,10 @@ export default function Home() {
   return (
     <PublicLayout premium>
       <HomeMotion />
-      <main id="main" className="home-main">
+      <noscript>
+        <style>{`.premium-site .home-tour-tabs, .premium-site .home-repair-view-toggle { display: none; }`}</style>
+      </noscript>
+      <main id="main" tabIndex={-1} className="home-main">
         <section className="home-hero" aria-labelledby="home-heading">
           <div className="hero-aura" aria-hidden="true" />
           <div className="home-hero-copy">
@@ -168,7 +172,11 @@ export default function Home() {
             </span>
           ))}
         </div>
-        <section id="features" className="home-section home-tour-section">
+        <section
+          id="features"
+          tabIndex={-1}
+          className="home-section home-tour-section"
+        >
           <div className="home-section-heading" data-reveal>
             <span className="home-eyebrow">
               ONE WORKSPACE. A CLEARER PICTURE.
@@ -181,10 +189,10 @@ export default function Home() {
             <p>
               From the big picture to the small details.
               <br />
-              Everything your rental business needs to stay connected.
+              Everyday essentials, thoughtfully connected.
             </p>
           </div>
-          <div id="product-tour" data-reveal>
+          <div id="product-tour" tabIndex={-1} data-reveal>
             <FeatureTour />
           </div>
         </section>
@@ -466,7 +474,11 @@ export default function Home() {
             </Link>
           </div>
         </section>
-        <section id="how-it-works" className="home-section home-start-section">
+        <section
+          id="how-it-works"
+          tabIndex={-1}
+          className="home-section home-start-section"
+        >
           <div className="home-section-heading" data-reveal>
             <span className="home-eyebrow">
               A FRESH START, WITHOUT STARTING OVER

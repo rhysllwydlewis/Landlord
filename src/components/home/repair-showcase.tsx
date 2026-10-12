@@ -18,11 +18,19 @@ export function RepairShowcase() {
         role="group"
         aria-label="Choose repair preview perspective"
       >
-        <button aria-pressed={tenant} onClick={() => setTenant(true)}>
+        <button
+          type="button"
+          aria-pressed={tenant}
+          onClick={() => setTenant(true)}
+        >
           <Users size={13} />
           Tenant view
         </button>
-        <button aria-pressed={!tenant} onClick={() => setTenant(false)}>
+        <button
+          type="button"
+          aria-pressed={!tenant}
+          onClick={() => setTenant(false)}
+        >
           <House size={13} />
           Landlord view
         </button>
@@ -38,8 +46,8 @@ export function RepairShowcase() {
         <h3>Kitchen tap leaking</h3>
         <p>12 Willow Road · Room 1</p>
         <div className="home-ticket-description">
-          The kitchen tap is dripping even when it’s turned off. I’ve attached a
-          photograph of the leak.
+          The kitchen tap is dripping even when it’s turned off. Please could
+          you take a look?
         </div>
         <div className="home-ticket-timeline">
           <div>
@@ -67,7 +75,7 @@ export function RepairShowcase() {
           <div>
             <strong>An update from your landlord</strong>
             <p>
-              Thanks for the photo. I’ve reviewed the issue and will keep you
+              Thanks for the report. I’ve reviewed the issue and will keep you
               updated here.
             </p>
           </div>
@@ -92,7 +100,7 @@ export function RepairShowcase() {
         </div>
       </div>
       <p className="home-repair-demo-caption">
-        Interactive illustration · no real repair is created
+        Illustrative repair preview · sample data
       </p>
     </div>
   );

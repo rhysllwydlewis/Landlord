@@ -1,7 +1,7 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 const links = [
   { href: "#features", label: "Features" },
@@ -9,15 +9,44 @@ const links = [
   { href: "/pricing", label: "Pricing" },
 ];
 export function HomeNavigation({ name, logo }: { name: string; logo: string }) {
-  const [open, setOpen] = useState(false);
-  const toggle = useRef<HTMLButtonElement>(null);
+  const header = useRef<HTMLElement>(null);
+  const menu = useRef<HTMLDetailsElement>(null);
+  const toggle = useRef<HTMLElement>(null);
+  function close() {
+    if (menu.current) menu.current.open = false;
+  }
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 760px)");
+    const resize = () => {
+      if (!mobile.matches) close();
+    };
+    const outside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !header.current?.contains(event.target)
+      )
+        close();
+    };
+    resize();
+    mobile.addEventListener("change", resize);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      mobile.removeEventListener("change", resize);
+      document.removeEventListener("pointerdown", outside);
+    };
+  }, []);
   return (
     <header
+      ref={header}
       className="home-navigation glass"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) close();
+      }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          setOpen(false);
-          toggle.current?.focus();
+        if (event.key === "Escape" && menu.current?.open) {
+          event.preventDefault();
+          close();
+          if (toggle.current?.getClientRects().length) toggle.current.focus();
         }
       }}
     >
@@ -41,35 +70,36 @@ export function HomeNavigation({ name, logo }: { name: string; logo: string }) {
         <Link href="/register" className="home-button home-button-small">
           Get started <ArrowUpRight size={14} aria-hidden="true" />
         </Link>
-        <button
-          ref={toggle}
-          className="home-menu-button"
-          type="button"
-          aria-label={open ? "Close menu" : "Open menu"}
-          aria-expanded={open}
-          aria-controls="home-mobile-menu"
-          onClick={() => setOpen(!open)}
-        >
-          {open ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        <details className="home-mobile-menu" ref={menu}>
+          <summary
+            ref={toggle}
+            role="button"
+            className="home-menu-button"
+            aria-controls="home-mobile-menu"
+          >
+            <Menu size={20} className="home-menu-open" aria-hidden="true" />
+            <X size={20} className="home-menu-close" aria-hidden="true" />
+            <span className="sr-only home-menu-open">Open menu</span>
+            <span className="sr-only home-menu-close">Close menu</span>
+          </summary>
+          <nav
+            id="home-mobile-menu"
+            className="home-mobile-nav"
+            aria-label="Mobile navigation"
+          >
+            {[
+              ...links,
+              { href: "/login", label: "Sign in" },
+              { href: "/help", label: "Help & support" },
+            ].map((link) => (
+              <Link key={link.href} href={link.href} onClick={close}>
+                {link.label}
+                <ArrowUpRight size={15} aria-hidden="true" />
+              </Link>
+            ))}
+          </nav>
+        </details>
       </div>
-      <nav
-        id="home-mobile-menu"
-        className="home-mobile-nav"
-        aria-label="Mobile navigation"
-        hidden={!open}
-      >
-        {[
-          ...links,
-          { href: "/login", label: "Sign in" },
-          { href: "/help", label: "Help & support" },
-        ].map((link) => (
-          <Link key={link.href} href={link.href} onClick={() => setOpen(false)}>
-            {link.label}
-            <ArrowUpRight size={15} aria-hidden="true" />
-          </Link>
-        ))}
-      </nav>
     </header>
   );
 }

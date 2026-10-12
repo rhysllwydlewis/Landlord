@@ -141,6 +141,7 @@ export async function dashboard(ctx: Context) {
           select: {
             id: true,
             title: true,
+            category: true,
             expiresAt: true,
             property: { select: { name: true } },
           },
@@ -234,7 +235,10 @@ export async function dashboard(ctx: Context) {
     },
     monthly,
     repairs: openRepairs.slice(0, 5),
-    compliance: compliance.slice(0, 5),
+    compliance: compliance.slice(0, 5).map((record) => ({
+      ...record,
+      title: stakeholder ? record.category : record.title,
+    })),
     tasks: tasks.slice(0, 5),
     activity,
     nextRent: obligations.find((o) => o.dueDate >= utcDay(now)) || null,
@@ -282,7 +286,10 @@ export async function options(ctx: Context) {
               name: true,
               email: true,
               userId: true,
-              participants: { select: { tenancyId: true } },
+              participants: {
+                where: { tenancy: linkedPropertyScope(ctx) },
+                select: { tenancyId: true },
+              },
             },
           })
         : ctx.role === "TENANT"

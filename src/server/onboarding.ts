@@ -179,6 +179,11 @@ export async function acceptInvitation(raw: unknown) {
         409,
         "This account already has a different organisation role.",
       );
+      invariant(
+        !existing?.active || i.role === "TENANT",
+        409,
+        "This account already has active access. Ask the owner to update its permissions instead.",
+      );
       await tx.membership.upsert({
         where: {
           organisationId_userId: {
@@ -193,7 +198,11 @@ export async function acceptInvitation(raw: unknown) {
           permissions: i.permissions,
           propertyIds: i.propertyIds,
         },
-        update: { active: true },
+        update: {
+          active: true,
+          permissions: i.permissions,
+          propertyIds: i.propertyIds,
+        },
       });
       if (i.tenantId)
         await tx.tenant.updateMany({

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Building2, ArrowUpRight } from "lucide-react";
+import Image from "next/image";
+import { ArrowUpRight } from "lucide-react";
 import { brand } from "@/lib/config";
 import { BrandIcon } from "./ui";
 import type { ReactNode } from "react";
@@ -43,7 +44,7 @@ export function PublicLayout({
       <footer className="public-footer">
         <div>
           <Link href="/" className="brand">
-            <Building2 size={24} />
+            <Image src={brand.logo} width={24} height={24} alt="" />
             {brand.name}
           </Link>
           <p>A clearer way to manage your rental business.</p>

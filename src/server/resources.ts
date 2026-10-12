@@ -145,6 +145,7 @@ export async function listResource(
             phone: true,
             userId: true,
             participants: {
+              where: { tenancy: linkedPropertyScope(ctx) },
               select: {
                 tenancy: {
                   select: {

@@ -2,42 +2,71 @@
 import { useEffect } from "react";
 export function HomeMotion() {
   useEffect(() => {
+    if (
+      !("IntersectionObserver" in window) ||
+      typeof Element.prototype.animate !== "function"
+    )
+      return;
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (preference.matches || !("IntersectionObserver" in window)) return;
-    const animations: Animation[] = [];
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          if (!preference.matches)
-            animations.push(
-              entry.target.animate(
-                [
-                  { opacity: 0, transform: "translateY(26px)" },
-                  { opacity: 1, transform: "translateY(0)" },
-                ],
-                { duration: 850, easing: "cubic-bezier(.2,.7,.2,1)" },
-              ),
-            );
-          observer.unobserve(entry.target);
-        }
-      },
-      { threshold: 0.12 },
-    );
-    document
-      .querySelectorAll(".premium-site [data-reveal]")
-      .forEach((element) => observer.observe(element));
-    const stop = () => {
-      if (preference.matches) {
-        animations.forEach((animation) => animation.cancel());
-        observer.disconnect();
-      }
-    };
-    preference.addEventListener("change", stop);
-    return () => {
-      observer.disconnect();
+    const animations = new Set<Animation>();
+    const seen = new WeakSet<Element>();
+    let observer: IntersectionObserver | undefined;
+    const cancel = () => {
       animations.forEach((animation) => animation.cancel());
-      preference.removeEventListener("change", stop);
+      animations.clear();
+    };
+    const configure = () => {
+      observer?.disconnect();
+      if (preference.matches) {
+        cancel();
+        return;
+      }
+      const current = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (
+              observer !== current ||
+              !entry.isIntersecting ||
+              seen.has(entry.target)
+            )
+              continue;
+            current.unobserve(entry.target);
+            seen.add(entry.target);
+            // Do not move or briefly hide a control the keyboard user is using.
+            if (
+              preference.matches ||
+              entry.target.contains(document.activeElement)
+            )
+              continue;
+            const animation = entry.target.animate(
+              [
+                { opacity: 0, transform: "translateY(26px)" },
+                { opacity: 1, transform: "translateY(0)" },
+              ],
+              { duration: 850, easing: "cubic-bezier(.2,.7,.2,1)" },
+            );
+            animations.add(animation);
+            void animation.finished.then(
+              () => animations.delete(animation),
+              () => animations.delete(animation),
+            );
+          }
+        },
+        { threshold: 0.12 },
+      );
+      observer = current;
+      document
+        .querySelectorAll(".premium-site [data-reveal]")
+        .forEach((element) => {
+          if (!seen.has(element)) current.observe(element);
+        });
+    };
+    preference.addEventListener("change", configure);
+    configure();
+    return () => {
+      observer?.disconnect();
+      cancel();
+      preference.removeEventListener("change", configure);
     };
   }, []);
   return null;

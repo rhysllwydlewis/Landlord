@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { db } from "@/server/db";
 import { auth } from "@/server/auth";
 import {
@@ -28,6 +28,9 @@ import type { Context } from "@/server/context";
 import { checkProperty, checkTenancy } from "@/server/context";
 import { utcDay } from "@/lib/calculations";
 import { earlierMessages } from "@/server/messages";
+import { options, dashboard } from "@/server/dashboard";
+import { acceptInvitation } from "@/server/onboarding";
+import * as contextMethods from "@/server/context";
 let owner: Context,
   tenant: Context,
   otherTenant: Context,
@@ -240,6 +243,163 @@ describe("Organisation and role boundaries", () => {
         .name,
     ).toBe("Other property");
   });
+  it("filters nested tenancy history for property-restricted staff", async () => {
+    const hidden = await createResource(owner, "properties", {
+      name: "Restricted tenancy history",
+      address: "9 Private Road, Bristol",
+      postcode: "BS1 1AZ",
+      type: "house",
+    });
+    const hiddenTenancy = await createResource(owner, "tenancies", {
+      propertyId: hidden.id,
+      tenantIds: [tenantId],
+      reference: `PRIVATE-${suffix}`,
+      startDate: past,
+      rentPence: 90000,
+      frequency: "monthly",
+      dueDay: 1,
+      depositPence: 90000,
+    });
+    const scoped = {
+      ...staff,
+      permissions: ["tenants:read"],
+      propertyIds: [propertyId],
+    };
+    const result = await listResource(scoped, "tenants", new URLSearchParams());
+    const entry = (
+      result.rows as {
+        id: string;
+        participants: { tenancy: { reference: string } }[];
+      }[]
+    ).find((t) => t.id === tenantId)!;
+    expect(entry).toBeTruthy();
+    expect(entry.participants).toEqual([
+      expect.objectContaining({
+        tenancy: expect.objectContaining({ reference: `T-${suffix}` }),
+      }),
+    ]);
+    const ownerRows = await listResource(
+      owner,
+      "tenants",
+      new URLSearchParams(),
+    );
+    expect(JSON.stringify(ownerRows.rows)).toContain(`PRIVATE-${suffix}`);
+    const choices = await options(scoped);
+    expect(
+      choices.tenants.find((t) => t.id === tenantId)?.participants,
+    ).toEqual([{ tenancyId }]);
+    expect(
+      choices.tenants.flatMap((t) => t.participants.map((p) => p.tenancyId)),
+    ).not.toContain(hiddenTenancy.id);
+    // Leave the tenant's original active-tenancy test fixtures unchanged.
+    await db.task.deleteMany({ where: { tenancyId: hiddenTenancy.id } });
+    await db.rentObligation.deleteMany({
+      where: { tenancyId: hiddenTenancy.id },
+    });
+    await db.deposit.deleteMany({ where: { tenancyId: hiddenTenancy.id } });
+    await db.tenancy.delete({ where: { id: hiddenTenancy.id } });
+    await db.property.delete({ where: { id: hidden.id } });
+  });
+  it.each(["STAFF", "STAKEHOLDER"] as const)(
+    "uses new invitation grants when reactivating %s and protects active access",
+    async (role) => {
+      const membership = await db.membership.findUniqueOrThrow({
+        where: {
+          organisationId_userId: {
+            organisationId: owner.organisationId,
+            userId: staff.userId,
+          },
+        },
+      });
+      await db.membership.update({
+        where: { id: membership.id },
+        data: {
+          role,
+          active: false,
+          permissions: ["finance:write"],
+          propertyIds: [],
+        },
+      });
+      const token = randomBytes(32).toString("hex");
+      const invitation = await db.invitation.create({
+        data: {
+          organisationId: owner.organisationId,
+          email: staff.email,
+          role,
+          permissions: ["repairs:read"],
+          propertyIds: [propertyId],
+          tokenHash: createHash("sha256").update(token).digest("hex"),
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+      const user = await db.user.findUniqueOrThrow({
+        where: { id: staff.userId },
+      });
+      const session = vi
+        .spyOn(contextMethods, "sessionUser")
+        .mockResolvedValue(user);
+      try {
+        await acceptInvitation({ token });
+        const updated = await db.membership.findUniqueOrThrow({
+          where: { id: membership.id },
+        });
+        expect(updated).toMatchObject({
+          active: true,
+          permissions: ["repairs:read"],
+          propertyIds: [propertyId],
+        });
+        await expect(acceptInvitation({ token })).rejects.toMatchObject({
+          status: 404,
+        });
+        const activeToken = randomBytes(32).toString("hex");
+        const pending = await db.invitation.create({
+          data: {
+            organisationId: owner.organisationId,
+            email: staff.email,
+            role,
+            permissions: ["finance:write"],
+            propertyIds: [],
+            tokenHash: createHash("sha256").update(activeToken).digest("hex"),
+            expiresAt: new Date(Date.now() + 86400000),
+          },
+        });
+        try {
+          await expect(
+            acceptInvitation({ token: activeToken }),
+          ).rejects.toMatchObject({ status: 409 });
+          expect(
+            await db.membership.findUniqueOrThrow({
+              where: { id: membership.id },
+            }),
+          ).toMatchObject({
+            permissions: ["repairs:read"],
+            propertyIds: [propertyId],
+          });
+          expect(
+            (
+              await db.invitation.findUniqueOrThrow({
+                where: { id: pending.id },
+              })
+            ).acceptedAt,
+          ).toBeNull();
+        } finally {
+          await db.invitation.delete({ where: { id: pending.id } });
+        }
+      } finally {
+        session.mockRestore();
+        await db.membership.update({
+          where: { id: membership.id },
+          data: {
+            role: membership.role,
+            active: membership.active,
+            permissions: membership.permissions,
+            propertyIds: membership.propertyIds,
+          },
+        });
+        await db.invitation.delete({ where: { id: invitation.id } });
+      }
+    },
+  );
   it("requires the exact requested tenancy for tenants", async () => {
     expect((await checkTenancy(tenant, tenancyId, "documents")).id).toBe(
       tenancyId,
@@ -749,6 +909,37 @@ describe("Review regressions", () => {
     });
     return { propertyId: p.id, tenancyId: t.id };
   }
+  it("redacts private compliance titles from stakeholder dashboard summaries", async () => {
+    const record = await createResource(owner, "compliance", {
+      propertyId,
+      title: "Private tenant insurance investigation",
+      category: "Insurance",
+      issuedAt: past,
+      expiresAt: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+      notes: "Internal tenant details",
+    });
+    const stakeholder = {
+      ...owner,
+      role: "STAKEHOLDER" as const,
+      propertyIds: [propertyId],
+      permissions: [],
+    };
+    try {
+      const summary = await dashboard(stakeholder);
+      expect(summary.compliance.find((c) => c.id === record.id)?.title).toBe(
+        "Insurance",
+      );
+      expect(JSON.stringify(summary)).not.toContain(
+        "Private tenant insurance investigation",
+      );
+      expect(
+        (await dashboard(owner)).compliance.find((c) => c.id === record.id)
+          ?.title,
+      ).toBe("Private tenant insurance investigation");
+    } finally {
+      await db.complianceRecord.delete({ where: { id: record.id } });
+    }
+  });
   it("intersects requested property filters with read-only owner access and returns compliance summaries", async () => {
     const t = await freshTenancy();
     await createResource(owner, "compliance", {
