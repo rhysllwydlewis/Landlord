@@ -1,0 +1,65 @@
+import Link from "next/link";
+import { Building2, ArrowUpRight } from "lucide-react";
+import { brand } from "@/lib/config";
+import { BrandIcon } from "./ui";
+import type { ReactNode } from "react";
+export function PublicLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="public-site">
+      <header className="public-header">
+        <Link href="/" className="brand">
+          <span className="brand-icon">
+            <BrandIcon />
+          </span>
+          <span>{brand.name}</span>
+        </Link>
+        <nav aria-label="Public navigation">
+          <Link href="/features">Features</Link>
+          <Link href="/pricing">Pricing</Link>
+          <Link href="/about">About</Link>
+          <Link href="/help">Help</Link>
+        </nav>
+        <div className="public-header-actions">
+          <Link href="/login" className="text-link">
+            Sign in
+          </Link>
+          <Link href="/register" className="button primary">
+            Get started <ArrowUpRight size={15} />
+          </Link>
+        </div>
+      </header>
+      {children}
+      <footer className="public-footer">
+        <div>
+          <Link href="/" className="brand">
+            <Building2 size={24} />
+            {brand.name}
+          </Link>
+          <p>A clearer way to manage your rental business.</p>
+          <small>
+            {brand.company ||
+              "Temporary product name. Company details will be configured before launch."}
+          </small>
+        </div>
+        <div>
+          <strong>Platform</strong>
+          <Link href="/features">Features</Link>
+          <Link href="/pricing">Pricing</Link>
+          <Link href="/listings">Rental listings</Link>
+        </div>
+        <div>
+          <strong>Company</strong>
+          <Link href="/about">About</Link>
+          <Link href="/contact">Contact</Link>
+          <Link href="/help">Help & support</Link>
+        </div>
+        <div>
+          <strong>Legal</strong>
+          <Link href="/privacy">Privacy notice</Link>
+          <Link href="/terms">Terms of service</Link>
+          <Link href="/cookies">Cookies</Link>
+        </div>
+      </footer>
+    </div>
+  );
+}

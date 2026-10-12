@@ -1,0 +1,703 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+model User {
+  id String @id
+  name String
+  email String @unique
+  emailVerified Boolean @default(false)
+  image String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+  accounts Account[]
+  memberships Membership[]
+  tenants Tenant[]
+  platformAdmin Boolean @default(false)
+  twoFactorEnabled Boolean @default(false)
+  twoFactors TwoFactor[]
+  @@map("user")
+}
+model Session {
+  id String @id
+  expiresAt DateTime
+  token String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  @@index([userId])
+  @@map("session")
+}
+model Account {
+  id String @id
+  accountId String
+  providerId String
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  accessToken String?
+  refreshToken String?
+  idToken String?
+  accessTokenExpiresAt DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope String?
+  password String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([providerId,accountId])
+  @@index([userId])
+  @@map("account")
+}
+model Verification {
+  id String @id
+  identifier String
+  value String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([identifier])
+  @@map("verification")
+}
+enum Role {
+  OWNER
+  STAFF
+  TENANT
+  STAKEHOLDER
+}
+model Organisation {
+  id String @id @default(cuid())
+  name String
+  type String @default("individual")
+  jurisdiction String @default("England")
+  settings Json @default("{}")
+  onboardingStep Int @default(0)
+  status String @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships Membership[]
+  portfolios Portfolio[]
+  entities OwnershipEntity[]
+  properties Property[]
+  tenants Tenant[]
+  invitations Invitation[]
+  operations OperationRecord[]
+  notifications Notification[]
+  jobs BackgroundJob[]
+  audit AuditLog[]
+  imports ImportJob[]
+  subscription Subscription?
+}
+model Membership {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  role Role
+  permissions String[] @default([])
+  propertyIds String[] @default([])
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  @@unique([organisationId,userId])
+  @@index([userId,active])
+}
+model Invitation {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  email String
+  role Role
+  tenantId String?
+  tokenHash String @unique
+  permissions String[] @default([])
+  propertyIds String[] @default([])
+  expiresAt DateTime
+  acceptedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([organisationId,email])
+}
+model Portfolio {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  name String
+  properties Property[]
+  @@unique([id,organisationId])
+  @@unique([organisationId,name])
+}
+model OwnershipEntity {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  name String
+  type String @default("individual")
+  companyNumber String?
+  properties Property[]
+  @@unique([id,organisationId])
+}
+model Property {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  portfolioId String?
+  portfolio Portfolio? @relation(fields:[portfolioId,organisationId],references:[id,organisationId])
+  ownerId String?
+  owner OwnershipEntity? @relation(fields:[ownerId,organisationId],references:[id,organisationId])
+  name String
+  address String
+  postcode String
+  type String @default("house")
+  jurisdiction String @default("England")
+  bedrooms Int @default(0)
+  bathrooms Int @default(0)
+  furnishing String @default("unfurnished")
+  epcRating String?
+  purchasePricePence Int?
+  valuePence Int?
+  details Json @default("{}")
+  notes String @default("")
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  units Unit[]
+  tenancies Tenancy[]
+  repairs Repair[]
+  expenses Expense[]
+  documents Document[]
+  compliance ComplianceRecord[]
+  tasks Task[]
+  operations OperationRecord[]
+  listings Listing[]
+  assets PropertyAsset[]
+  @@unique([id,organisationId])
+  @@index([organisationId,archivedAt])
+}
+model Unit {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  name String
+  type String @default("room")
+  archivedAt DateTime?
+  tenancies Tenancy[]
+  repairs Repair[]
+  @@unique([id,organisationId])
+  @@unique([propertyId,name])
+}
+model Tenant {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  userId String?
+  user User? @relation(fields:[userId],references:[id],onDelete:SetNull)
+  name String
+  email String
+  phone String @default("")
+  details Json @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  participants TenancyParticipant[]
+  reportedRepairs Repair[] @relation("Reporter")
+  repairGrants RepairAccess[]
+  documentGrants DocumentAccess[]
+  @@unique([id,organisationId])
+  @@unique([organisationId,email])
+  @@index([userId])
+}
+model Tenancy {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  unitId String?
+  unit Unit? @relation(fields:[unitId,organisationId],references:[id,organisationId])
+  reference String
+  startDate DateTime @db.Date
+  endDate DateTime? @db.Date
+  status String @default("active")
+  rentPence Int
+  frequency String @default("monthly")
+  dueDay Int @default(1)
+  depositPence Int @default(0)
+  details Json @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  participants TenancyParticipant[]
+  obligations RentObligation[]
+  payments Payment[]
+  repairs Repair[]
+  documents Document[]
+  conversations Conversation[]
+  deposit Deposit?
+  rentChanges RentChange[]
+  tasks Task[]
+  operations OperationRecord[]
+  @@unique([id,organisationId])
+  @@unique([organisationId,reference])
+  @@index([organisationId,status])
+}
+model TenancyParticipant {
+  organisationId String
+  tenancyId String
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  tenantId String
+  tenant Tenant @relation(fields:[tenantId,organisationId],references:[id,organisationId])
+  @@id([tenancyId,tenantId])
+  @@index([tenantId])
+}
+model RentObligation {
+  id String @id @default(cuid())
+  organisationId String
+  tenancyId String
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  dueDate DateTime @db.Date
+  amountPence Int
+  description String @default("Rent")
+  scheduleKey String @unique
+  allocations PaymentAllocation[]
+  createdAt DateTime @default(now())
+  @@unique([id,organisationId])
+  @@index([organisationId,dueDate])
+}
+model Payment {
+  id String @id @default(cuid())
+  organisationId String
+  tenancyId String
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  amountPence Int
+  paidAt DateTime @db.Date
+  method String @default("bank transfer")
+  reference String
+  idempotencyKey String @unique
+  allocations PaymentAllocation[]
+  createdAt DateTime @default(now())
+  @@unique([id,organisationId])
+  @@index([organisationId,paidAt])
+}
+model PaymentAllocation {
+  id String @id @default(cuid())
+  organisationId String
+  paymentId String
+  payment Payment @relation(fields:[paymentId,organisationId],references:[id,organisationId])
+  obligationId String
+  obligation RentObligation @relation(fields:[obligationId,organisationId],references:[id,organisationId])
+  amountPence Int
+  @@unique([paymentId,obligationId])
+}
+model Repair {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  unitId String?
+  unit Unit? @relation(fields:[unitId,organisationId],references:[id,organisationId])
+  tenancyId String?
+  tenancy Tenancy? @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  reportedByTenantId String?
+  reporter Tenant? @relation("Reporter",fields:[reportedByTenantId,organisationId],references:[id,organisationId])
+  createdByUserId String
+  reference String
+  title String
+  description String
+  category String
+  priority String @default("normal")
+  status String @default("reported")
+  source String @default("landlord")
+  visibility String @default("private")
+  tenantComments Boolean @default(true)
+  internalNotes String @default("")
+  issueStartedAt DateTime? @db.Date
+  ongoing Boolean @default(true)
+  targetDate DateTime? @db.Date
+  completedAt DateTime?
+  completionSummary String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  grants RepairAccess[]
+  updates RepairUpdate[]
+  comments RepairComment[]
+  documents Document[]
+  expenses Expense[]
+  tasks Task[]
+  @@unique([id,organisationId])
+  @@unique([organisationId,reference])
+  @@index([organisationId,status,priority])
+}
+model RepairAccess {
+  organisationId String
+  repairId String
+  repair Repair @relation(fields:[repairId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  tenantId String
+  tenant Tenant @relation(fields:[tenantId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  @@id([repairId,tenantId])
+}
+model RepairUpdate {
+  id String @id @default(cuid())
+  organisationId String
+  repairId String
+  repair Repair @relation(fields:[repairId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  actorUserId String
+  status String
+  text String
+  public Boolean @default(false)
+  createdAt DateTime @default(now())
+}
+model RepairComment {
+  id String @id @default(cuid())
+  organisationId String
+  repairId String
+  repair Repair @relation(fields:[repairId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  authorUserId String
+  authorName String
+  body String
+  public Boolean @default(false)
+  createdAt DateTime @default(now())
+}
+model Expense {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  repairId String?
+  repair Repair? @relation(fields:[repairId,organisationId],references:[id,organisationId])
+  category String
+  description String
+  supplier String @default("")
+  invoiceReference String @default("")
+  amountPence Int
+  incurredAt DateTime @db.Date
+  reconciled Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@index([organisationId,incurredAt])
+}
+model Document {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String?
+  property Property? @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  tenancyId String?
+  tenancy Tenancy? @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  repairId String?
+  repair Repair? @relation(fields:[repairId,organisationId],references:[id,organisationId])
+  name String
+  category String
+  storageKey String @unique
+  contentType String
+  size Int
+  checksum String
+  uploadedByUserId String
+  visibility String @default("private")
+  ownerVisible Boolean @default(false)
+  version Int @default(1)
+  expiresAt DateTime?
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  grants DocumentAccess[]
+  @@unique([id,organisationId])
+  @@index([organisationId,category])
+}
+model DocumentAccess {
+  organisationId String
+  documentId String
+  document Document @relation(fields:[documentId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  tenantId String
+  tenant Tenant @relation(fields:[tenantId,organisationId],references:[id,organisationId])
+  @@id([documentId,tenantId])
+}
+model Conversation {
+  id String @id @default(cuid())
+  organisationId String
+  tenancyId String
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  subject String
+  participantUserIds String[]
+  createdAt DateTime @default(now())
+  messages Message[]
+  @@unique([id,organisationId])
+}
+model Message {
+  id String @id @default(cuid())
+  organisationId String
+  conversationId String
+  conversation Conversation @relation(fields:[conversationId,organisationId],references:[id,organisationId],onDelete:Cascade)
+  senderUserId String
+  senderName String
+  body String
+  readBy String[] @default([])
+  createdAt DateTime @default(now())
+}
+model Notification {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  userId String
+  title String
+  href String
+  resourceType String?
+  resourceId String?
+  readAt DateTime?
+  dedupeKey String @unique
+  createdAt DateTime @default(now())
+  @@index([organisationId,userId,readAt])
+}
+model ComplianceRecord {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  title String
+  category String
+  issuedAt DateTime @db.Date
+  expiresAt DateTime? @db.Date
+  status String @default("recorded")
+  reference String @default("")
+  notes String @default("")
+  documentId String?
+  replacesId String?
+  replaces ComplianceRecord? @relation("ComplianceReplacement",fields:[replacesId,organisationId],references:[id,organisationId])
+  replacements ComplianceRecord[] @relation("ComplianceReplacement")
+  createdAt DateTime @default(now())
+  @@index([organisationId,expiresAt])
+  @@unique([id,organisationId])
+}
+model ComplianceRule {
+  id String @id @default(cuid())
+  name String
+  jurisdiction String
+  propertyTypes String[]
+  version Int
+  effectiveFrom DateTime @db.Date
+  effectiveTo DateTime? @db.Date
+  sourceUrl String
+  instructions String
+  reviewed Boolean @default(false)
+  active Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@unique([name,jurisdiction,version])
+}
+model Task {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String?
+  property Property? @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  tenancyId String?
+  tenancy Tenancy? @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  repairId String?
+  repair Repair? @relation(fields:[repairId,organisationId],references:[id,organisationId])
+  title String
+  notes String @default("")
+  category String @default("general")
+  priority String @default("normal")
+  status String @default("open")
+  dueDate DateTime @db.Date
+  assignedToUserId String?
+  recurrenceDays Int?
+  dedupeKey String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([organisationId,status,dueDate])
+}
+model Deposit {
+  id String @id @default(cuid())
+  organisationId String
+  tenancyId String @unique
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  amountPence Int
+  receivedAt DateTime? @db.Date
+  scheme String @default("")
+  reference String @default("")
+  status String @default("not recorded")
+  returnedPence Int @default(0)
+  notes String @default("")
+  deductions Json @default("[]")
+  updatedAt DateTime @updatedAt
+  @@unique([tenancyId,organisationId])
+}
+model PropertyAsset {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  name String
+  category String
+  installedAt DateTime? @db.Date
+  lastServiceAt DateTime? @db.Date
+  serviceIntervalMonths Int @default(12)
+  warrantyExpiresAt DateTime? @db.Date
+  replacementAt DateTime? @db.Date
+  notes String @default("")
+  @@index([organisationId,propertyId])
+}
+model Listing {
+  id String @id @default(cuid())
+  organisationId String
+  propertyId String
+  property Property @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  slug String @unique
+  title String
+  description String
+  rentPence Int
+  depositPence Int
+  availableAt DateTime @db.Date
+  published Boolean @default(false)
+  createdAt DateTime @default(now())
+  applications Application[]
+  @@unique([id,organisationId])
+}
+model Application {
+  id String @id @default(cuid())
+  organisationId String
+  listingId String
+  listing Listing @relation(fields:[listingId,organisationId],references:[id,organisationId])
+  name String
+  email String
+  phone String
+  status String @default("enquiry")
+  details Json @default("{}")
+  referencingStatus String @default("not started")
+  consentAt DateTime
+  retentionUntil DateTime
+  createdAt DateTime @default(now())
+  @@index([organisationId,status])
+}
+// Versioned, validated domain payloads for inventories, transition checklists,
+// EPC plans, feedback, guarantors, bank import rows and rental passport entries.
+model OperationRecord {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  kind String
+  propertyId String?
+  property Property? @relation(fields:[propertyId,organisationId],references:[id,organisationId])
+  tenancyId String?
+  tenancy Tenancy? @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  userId String?
+  title String
+  status String @default("draft")
+  schemaVersion Int @default(1)
+  data Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([organisationId,kind])
+}
+model SubscriptionPlan {
+  id String @id @default(cuid())
+  name String
+  monthlyPence Int
+  annualPence Int
+  propertyLimit Int
+  unitLimit Int
+  staffLimit Int
+  storageBytes BigInt
+  features String[]
+  trialDays Int @default(14)
+  stripeMonthlyPriceId String?
+  stripeAnnualPriceId String?
+  active Boolean @default(false)
+  developmentOnly Boolean @default(false)
+  subscriptions Subscription[]
+}
+model Subscription {
+  id String @id @default(cuid())
+  organisationId String @unique
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  planId String
+  plan SubscriptionPlan @relation(fields:[planId],references:[id])
+  provider String
+  status String
+  stripeCustomerId String? @unique
+  stripeSubscriptionId String? @unique
+  currentPeriodEnd DateTime?
+  trialEndsAt DateTime?
+  updatedAt DateTime @updatedAt
+}
+model IntegrationEvent {
+  id String @id
+  provider String
+  processedAt DateTime @default(now())
+}
+model ImportJob {
+  id String @id @default(cuid())
+  organisationId String
+  organisation Organisation @relation(fields:[organisationId],references:[id],onDelete:Cascade)
+  type String
+  status String @default("preview")
+  rows Json
+  errors Json
+  mapping Json
+  createdIds String[] @default([])
+  createdByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model AuditLog {
+  id String @id @default(cuid())
+  organisationId String?
+  organisation Organisation? @relation(fields:[organisationId],references:[id])
+  actorUserId String
+  action String
+  resourceType String
+  resourceId String
+  metadata Json @default("{}")
+  createdAt DateTime @default(now())
+  @@index([organisationId,createdAt])
+}
+model BackgroundJob {
+  id String @id @default(cuid())
+  organisationId String?
+  organisation Organisation? @relation(fields:[organisationId],references:[id])
+  type String
+  payload Json
+  dedupeKey String @unique
+  status String @default("queued")
+  attempts Int @default(0)
+  runAt DateTime @default(now())
+  lockedAt DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status,runAt])
+}
+model RateLimit {
+  id String @id @default(cuid())
+  key String @unique
+  count Int
+  lastRequest BigInt
+}
+
+model TwoFactor {
+  id String @id
+  secret String
+  backupCodes String
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  verified Boolean? @default(false)
+  failedVerificationCount Int @default(0)
+  lockedUntil DateTime?
+  @@index([userId])
+}
+model PlatformSetting {
+  key String @id
+  value Json
+  updatedAt DateTime @updatedAt
+}
+
+model RentChange {
+  id String @id @default(cuid())
+  organisationId String
+  tenancyId String
+  tenancy Tenancy @relation(fields:[tenancyId,organisationId],references:[id,organisationId])
+  rentPence Int
+  effectiveFrom DateTime @db.Date
+  reason String
+  actorUserId String
+  createdAt DateTime @default(now())
+  @@unique([tenancyId,effectiveFrom])
+}
