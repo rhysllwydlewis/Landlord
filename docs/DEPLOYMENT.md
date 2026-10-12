@@ -26,7 +26,24 @@ Do not run `prisma migrate dev` or a seed on production. Restart the development
 
 The Dockerfile provides a build and a non-root runtime. It includes the job/migration tooling so the same image can run controlled release and scheduled worker commands. Build-time public branding arguments are non-secret. The build database URL is a nonfunctional placeholder, because public listing queries are request-time dynamic. Configure genuine runtime variables externally.
 
-In a managed environment that requires the session CA for npm, build with the optional BuildKit secret `--secret id=proxy_ca,src="$CODEX_PROXY_CERT"` and inherited Docker proxy configuration. The CA is not copied into image layers. Other environments use their trusted system CA. Never disable TLS validation.
+The production Dockerfile uses standard `RUN` instructions and strict TLS validation. It intentionally contains no BuildKit secret mounts: some hosted builders, including the Railway builder that reported this failure, reject mount types other than caches. Normal hosts use their trusted system certificates.
+
+In a certificate-proxied development environment, use a temporary verification-only Dockerfile that mounts the provided CA on the dependency-install step, with `NODE_EXTRA_CA_CERTS` set for that step. Keep the production Dockerfile portable and do not copy proxy certificates into image layers or disable TLS validation.
+
+## Railway configuration
+
+Use the repository root and the root `Dockerfile`. Keep the image's `npm start` command; Next.js listens on `0.0.0.0` and honours Railway's runtime `PORT`. Set `APP_URL` and `BETTER_AUTH_URL` to the actual HTTPS application origin, provide a generated `BETTER_AUTH_SECRET` (at least 32 random characters), and set `DATABASE_URL` from the intended PostgreSQL service. Configure email, storage and billing separately as described in `INTEGRATIONS.md`.
+
+Use `npm run db:migrate` as a controlled pre-deploy command against that database. Do not seed production. Runtime credentials belong in service variables, not Docker build arguments. Public branding arguments are fixed at build time, so changes require rebuilding the image.
+
+Validate the container locally before release:
+
+```sh
+docker build --tag property-management-platform:check .
+node scripts/check-container.mjs
+```
+
+The smoke check uses an ephemeral container bound only to localhost, a generated disposable authentication secret and an intentionally unavailable database. It checks the configured port, the homepage, the non-root runtime, excluded private files and denial of anonymous workspace access. It does not connect a real database or provider, run migrations, or verify a deployed Railway service. GitHub CI also builds the unmodified production Dockerfile and runs this check.
 
 ## Scheduled jobs
 
