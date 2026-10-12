@@ -12,9 +12,9 @@ import { invariant } from "./errors";
 import { notify, managerIds } from "./notifications";
 import { repairStatuses, repairCategories } from "@/lib/config";
 export const repairInput = z.object({
-  propertyId: z.string(),
-  unitId: z.string().optional(),
-  tenancyId: z.string().optional(),
+  propertyId: z.string().min(1),
+  unitId: z.string().min(1).optional(),
+  tenancyId: z.string().min(1).optional(),
   title: z.string().trim().min(3).max(160),
   description: z.string().trim().min(10).max(10000),
   category: z.enum(repairCategories),
@@ -23,6 +23,13 @@ export const repairInput = z.object({
   ongoing: z.boolean().default(true),
   targetDate: z.iso.date().optional(),
   internalNotes: z.string().max(10000).default(""),
+  estimatedCostPence: z
+    .number()
+    .int()
+    .min(0)
+    .max(2000000000)
+    .nullable()
+    .optional(),
 });
 export function repairWhere(ctx: Context) {
   return {
@@ -57,6 +64,12 @@ export async function getRepair(ctx: Context, id: string) {
       documents: {
         where: {
           archivedAt: null,
+          ...(ctx.role === "STAFF" &&
+          !ctx.permissions.some((p) =>
+            ["documents:read", "documents:write"].includes(p),
+          )
+            ? { id: { in: [] as string[] } }
+            : {}),
           ...(ctx.role === "TENANT"
             ? {
                 visibility: "shared",
@@ -97,6 +110,8 @@ export async function getRepair(ctx: Context, id: string) {
       createdAt: r.createdAt,
       targetDate: r.targetDate,
       completedAt: r.completedAt,
+      issueStartedAt: r.issueStartedAt,
+      ongoing: r.ongoing,
       completionSummary: r.completionSummary,
       tenantComments: r.tenantComments,
       updates: r.updates.map((u) => ({
@@ -118,7 +133,14 @@ export async function getRepair(ctx: Context, id: string) {
         size: d.size,
       })),
     };
-  return r;
+  return {
+    ...r,
+    estimatedCostPence:
+      ctx.role === "OWNER" ||
+      ctx.permissions.some((p) => ["finance:read", "finance:write"].includes(p))
+        ? r.estimatedCostPence
+        : null,
+  };
 }
 export async function repairRecipients(ctx: Context, id: string) {
   const r = await db.repair.findFirst({
@@ -153,6 +175,9 @@ export async function createRepair(ctx: Context, raw: unknown) {
           propertyId: input.propertyId,
           status: { in: ["active", "periodic", "ending"] },
           ...(input.tenancyId ? { id: input.tenancyId } : {}),
+          ...(input.unitId
+            ? { OR: [{ unitId: input.unitId }, { unitId: null }] }
+            : {}),
         },
       },
     });
@@ -161,19 +186,28 @@ export async function createRepair(ctx: Context, raw: unknown) {
     input.tenancyId = participant.tenancyId;
     input.internalNotes = "";
     input.targetDate = undefined;
+    input.estimatedCostPence = undefined;
   } else await checkProperty(ctx, input.propertyId, "repairs");
+  if (input.estimatedCostPence !== undefined) {
+    permit(ctx, "finance", true);
+    await entitlement(ctx, "finance");
+  }
   if (input.unitId) {
     const u = await db.unit.findFirst({
       where: {
         id: input.unitId,
         propertyId: input.propertyId,
         organisationId: ctx.organisationId,
+        archivedAt: null,
       },
     });
     invariant(u, 422, "Room does not belong to this property.");
     if (ctx.role === "TENANT") {
       const t = await db.tenancy.findFirst({
-        where: { id: input.tenancyId, unitId: input.unitId },
+        where: {
+          id: input.tenancyId,
+          OR: [{ unitId: input.unitId }, { unitId: null }],
+        },
       });
       invariant(t, 403, "Choose your own room or the common property.");
     }
@@ -244,39 +278,91 @@ const updateInput = z.object({
   internalNotes: z.string().max(10000).optional(),
   completionSummary: z.string().max(10000).optional(),
   tenantComments: z.boolean().optional(),
+  estimatedCostPence: z
+    .number()
+    .int()
+    .min(0)
+    .max(2000000000)
+    .nullable()
+    .optional(),
+  completedAt: z.iso.date().optional(),
 });
 export async function updateRepair(ctx: Context, id: string, raw: unknown) {
   permit(ctx, "repairs", true);
   await entitlement(ctx, "repairs");
   await getRepair(ctx, id);
   const input = updateInput.parse(raw);
+  if (input.estimatedCostPence !== undefined) {
+    permit(ctx, "finance", true);
+    await entitlement(ctx, "finance");
+  }
   return db.$transaction(
     async (tx) => {
       const before = await tx.repair.findUniqueOrThrow({ where: { id } });
+      const finalStatus = ["resolved", "closed"].includes(
+        input.status || before.status,
+      );
+      if (input.completedAt) {
+        invariant(
+          finalStatus,
+          422,
+          "Completion dates require a resolved or closed repair.",
+        );
+        invariant(
+          input.completedAt <= new Date().toISOString().slice(0, 10),
+          422,
+          "Completion cannot be in the future.",
+        );
+        invariant(
+          !before.issueStartedAt ||
+            new Date(input.completedAt) >= before.issueStartedAt,
+          422,
+          "Completion cannot precede the issue start date.",
+        );
+      }
+      const publicChange =
+        (input.status !== undefined && input.status !== before.status) ||
+        (input.priority !== undefined && input.priority !== before.priority) ||
+        (input.targetDate !== undefined &&
+          input.targetDate !== before.targetDate?.toISOString().slice(0, 10) &&
+          !(input.targetDate === null && before.targetDate === null)) ||
+        (input.completionSummary !== undefined &&
+          input.completionSummary !== before.completionSummary) ||
+        (input.completedAt !== undefined &&
+          input.completedAt !== before.completedAt?.toISOString().slice(0, 10));
+      const completionDate = input.completedAt
+        ? input.completedAt === before.completedAt?.toISOString().slice(0, 10)
+          ? before.completedAt
+          : new Date(input.completedAt)
+        : input.status
+          ? finalStatus
+            ? before.completedAt || new Date()
+            : null
+          : before.completedAt;
       const r = await tx.repair.update({
         where: { id },
         data: {
           ...input,
+          completedAt: completionDate,
           targetDate:
             input.targetDate === undefined
               ? undefined
               : input.targetDate
                 ? new Date(input.targetDate)
                 : null,
-          ...(input.status
-            ? {
-                completedAt: ["resolved", "closed"].includes(input.status)
-                  ? new Date()
-                  : null,
-              }
-            : {}),
-          ...(input.status && input.status !== before.status
+          ...(publicChange
             ? {
                 updates: {
                   create: {
                     actorUserId: ctx.userId,
-                    status: input.status,
-                    text: `Status changed to ${input.status}.`,
+                    status: input.status || before.status,
+                    text:
+                      (input.status && input.status !== before.status
+                        ? `Status changed to ${input.status}.`
+                        : "Repair details updated.") +
+                      (finalStatus && completionDate
+                        ? ` Completion recorded for ${completionDate.toISOString().slice(0, 10)}.`
+                        : ""),
                     public: true,
                   },
                 },
@@ -291,14 +377,19 @@ export async function updateRepair(ctx: Context, id: string, raw: unknown) {
           action: "repair.updated",
           resourceType: "repair",
           resourceId: id,
-          metadata: { status: r.status },
+          metadata: {
+            status: r.status,
+            completedAt: r.completedAt?.toISOString() || "",
+          },
         },
       });
-      if (input.status && input.status !== before.status)
+      if (publicChange)
         await notify(
           ctx.organisationId,
           await repairRecipients(ctx, id),
-          "Repair status updated",
+          input.status && input.status !== before.status
+            ? "Repair status updated"
+            : "Repair details updated",
           `/app/repairs/${id}`,
           `status:${id}:${randomUUID()}`,
           "repair",
@@ -333,7 +424,9 @@ export async function setRepairVisibility(
           tenancy: {
             propertyId: r.propertyId,
             status: { in: ["active", "periodic", "ending"] },
-            ...(r.unitId ? { unitId: r.unitId } : {}),
+            ...(r.unitId
+              ? { OR: [{ unitId: r.unitId }, { unitId: null }] }
+              : {}),
           },
         },
       },

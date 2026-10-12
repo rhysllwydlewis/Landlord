@@ -1,5 +1,9 @@
 import Link from "next/link";
 import {
+  organisationSettings,
+  profilePreferences,
+} from "@/lib/workspace-settings";
+import {
   House,
   Wrench,
   CirclePoundSterling,
@@ -12,7 +16,7 @@ import { permit, type Context } from "@/server/context";
 import { db } from "@/server/db";
 import { options, dashboard, can } from "@/server/dashboard";
 import { financialReport } from "@/server/reports";
-import { repairWhere } from "@/server/repairs";
+import { canViewNotification } from "@/server/notifications";
 import { PageHeader, Panel, Status, Empty } from "./ui";
 import {
   SettingsForm,
@@ -96,8 +100,19 @@ export async function SpecialModule({
     });
     const org = await db.organisation.findUniqueOrThrow({
       where: { id: ctx.organisationId },
-      select: { name: true },
+      select: { name: true, settings: true },
     });
+    const user = await db.user.findUniqueOrThrow({
+      where: { id: ctx.userId },
+      select: { twoFactorEnabled: true },
+    });
+    const ownTenant =
+      ctx.role === "TENANT"
+        ? await db.tenant.findFirst({
+            where: { userId: ctx.userId, organisationId: ctx.organisationId },
+            select: { phone: true },
+          })
+        : null;
     return (
       <>
         <PageHeader
@@ -117,6 +132,12 @@ export async function SpecialModule({
               name={ctx.name}
               organisationName={org.name}
               owner={ctx.role === "OWNER"}
+              profile={profilePreferences({
+                phone: ownTenant?.phone || "",
+                ...((preference?.data || {}) as Record<string, unknown>),
+              })}
+              workspaceSettings={organisationSettings(org.settings)}
+              twoFactorEnabled={!!user.twoFactorEnabled}
               emailUpdates={
                 (preference?.data as { email?: boolean } | undefined)?.email !==
                 false
@@ -292,16 +313,7 @@ export async function SpecialModule({
     });
     const notifications = [];
     for (const n of raw) {
-      if (n.resourceType === "repair") {
-        if (
-          ctx.role === "TENANT" &&
-          !(await db.repair.findFirst({
-            where: { ...repairWhere(ctx), id: n.resourceId || "" },
-          }))
-        )
-          continue;
-        if (ctx.role === "STAFF" && !can(ctx, "repairs")) continue;
-      }
+      if (!(await canViewNotification(ctx, n))) continue;
       notifications.push(n);
     }
     return (

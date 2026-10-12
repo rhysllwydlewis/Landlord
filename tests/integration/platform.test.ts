@@ -28,6 +28,7 @@ import type { Context } from "@/server/context";
 import { checkProperty, checkTenancy } from "@/server/context";
 import { utcDay } from "@/lib/calculations";
 import { earlierMessages } from "@/server/messages";
+import { respondToFeedback } from "@/server/feedback";
 import { options, dashboard } from "@/server/dashboard";
 import { acceptInvitation } from "@/server/onboarding";
 import * as contextMethods from "@/server/context";
@@ -687,11 +688,11 @@ describe("Ledger, reminders and operations", () => {
         .toISOString()
         .slice(0, 10),
     });
-    await schedule();
+    await schedule(new Date(), owner.organisationId);
     const before = await db.notification.count({
       where: { organisationId: owner.organisationId },
     });
-    await schedule();
+    await schedule(new Date(), owner.organisationId);
     expect(
       await db.notification.count({
         where: { organisationId: owner.organisationId },
@@ -1222,12 +1223,9 @@ describe("Review regressions", () => {
       tenancyId,
       data: { type: "general", body: "Please review this message" },
     });
-    await updateResource(owner, "feedback", feedback.id, {
-      data: {
-        type: "general",
-        body: "Please review this message",
-        response: "We have responded",
-      },
+    await respondToFeedback(owner, feedback.id, {
+      response: "We have responded",
+      idempotencyKey: randomUUID(),
     });
     await updateResource(tenant, "feedback", feedback.id, {
       data: {

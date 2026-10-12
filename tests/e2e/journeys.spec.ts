@@ -387,12 +387,34 @@ test("scoped staff cannot open or edit a different requested property", async ({
       postcode: "BS1 1AA",
     },
   });
+  const privateTitle = `Restricted feedback alert ${randomUUID()}`;
+  const privateFeedback = await db.operationRecord.create({
+    data: {
+      organisationId: member.organisationId,
+      kind: "feedback",
+      propertyId: denied.id,
+      userId: member.userId,
+      title: "Restricted feedback",
+      data: { type: "general", body: "Private scoped feedback." },
+    },
+  });
+  const privateNotification = await db.notification.create({
+    data: {
+      organisationId: member.organisationId,
+      userId: member.userId,
+      title: privateTitle,
+      href: "/app/feedback",
+      resourceType: "feedback",
+      resourceId: privateFeedback.id,
+      dedupeKey: randomUUID(),
+    },
+  });
   try {
     await db.membership.update({
       where: { id: member.id },
       data: {
         role: "STAFF",
-        permissions: ["properties:write"],
+        permissions: ["properties:write", "operations:read"],
         propertyIds: [allowed.id],
       },
     });
@@ -417,7 +439,22 @@ test("scoped staff cannot open or edit a different requested property", async ({
       (await db.property.findUniqueOrThrow({ where: { id: outsider.id } }))
         .name,
     ).toBe("Outside property");
+    await landlord.page.goto("/app/notifications");
+    await expect(
+      landlord.page.getByRole("heading", {
+        name: "Notification centre",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      landlord.page.getByText(privateTitle, { exact: true }),
+    ).toHaveCount(0);
+    expect(
+      await (await landlord.page.request.get("/app/notifications")).text(),
+    ).not.toContain(privateTitle);
   } finally {
+    await db.notification.delete({ where: { id: privateNotification.id } });
+    await db.operationRecord.delete({ where: { id: privateFeedback.id } });
     await db.membership.update({
       where: { id: member.id },
       data: {
@@ -580,11 +617,9 @@ test("tenancy conversations retain access to older messages", async ({
     })),
   });
   await tenant.page.goto("/app/messages");
-  const thread = tenant.page
-    .locator("section.thread")
-    .filter({
-      has: tenant.page.getByRole("heading", { name: subject, exact: true }),
-    });
+  const thread = tenant.page.locator("section.thread").filter({
+    has: tenant.page.getByRole("heading", { name: subject, exact: true }),
+  });
   await expect(
     thread.getByText("History reply 54", { exact: true }),
   ).toBeVisible();

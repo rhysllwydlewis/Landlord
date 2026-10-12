@@ -2,12 +2,19 @@ import { Resend } from "resend";
 import { db } from "./db";
 import { generateRent } from "./ledger";
 import { outstanding, utcDay } from "@/lib/calculations";
-import { notify, managerIds } from "./notifications";
+import { notify, managerIds, canViewNotification } from "./notifications";
 import type { Context } from "./context";
 import { invariant } from "./errors";
-export async function schedule(now = new Date()) {
-  const orgs = await db.organisation.findMany({ where: { status: "active" } });
+import { organisationSettings } from "@/lib/workspace-settings";
+export async function schedule(now = new Date(), organisationId?: string) {
+  const orgs = await db.organisation.findMany({
+    where: {
+      status: "active",
+      ...(organisationId ? { id: organisationId } : {}),
+    },
+  });
   for (const org of orgs) {
+    const preferences = organisationSettings(org.settings);
     const ctx: Context = {
       organisationId: org.id,
       userId: "system",
@@ -25,21 +32,51 @@ export async function schedule(now = new Date()) {
       where: {
         organisationId: org.id,
         status: { not: "superseded" },
-        expiresAt: { lte: new Date(now.getTime() + 30 * 86400000) },
+        expiresAt: {
+          lte: new Date(
+            now.getTime() + preferences.complianceReminderDays * 86400000,
+          ),
+        },
       },
     });
     for (const c of compliance) {
       const days = Math.ceil(
         (c.expiresAt!.getTime() - now.getTime()) / 86400000,
       );
-      if (days <= 30)
+      if (days <= preferences.complianceReminderDays)
         await notify(
           org.id,
           await managerIds(ctx, "compliance", c.propertyId),
           "Compliance record needs review",
           "/app/compliance",
-          `compliance:${c.id}:${days > 7 ? "30" : days > 0 ? "7" : "expired"}`,
+          `compliance:${c.id}:${days > 7 ? String(preferences.complianceReminderDays) : days > 0 ? "7" : "expired"}`,
         );
+    }
+    const documents = await db.document.findMany({
+      where: {
+        organisationId: org.id,
+        archivedAt: null,
+        expiresAt: {
+          lte: new Date(
+            now.getTime() + preferences.documentReminderDays * 86400000,
+          ),
+        },
+        OR: [{ propertyId: null }, { property: { archivedAt: null } }],
+      },
+    });
+    for (const document of documents) {
+      const days = Math.ceil(
+        (document.expiresAt!.getTime() - now.getTime()) / 86400000,
+      );
+      await notify(
+        org.id,
+        await managerIds(ctx, "documents", document.propertyId || undefined),
+        "Document expiry needs review",
+        "/app/documents",
+        `document-expiry:${document.id}:${document.expiresAt!.toISOString().slice(0, 10)}:${days > 7 ? "upcoming" : days > 0 ? "near" : "expired"}`,
+        "document",
+        document.id,
+      );
     }
     const rent = await db.rentObligation.findMany({
       where: { organisationId: org.id, dueDate: { lt: utcDay(now) } },
@@ -111,16 +148,21 @@ export async function schedule(now = new Date()) {
     }
   }
 }
-export async function processJobs() {
+export async function processJobs(organisationId?: string) {
   await db.backgroundJob.updateMany({
     where: {
       status: "processing",
       lockedAt: { lt: new Date(Date.now() - 15 * 60000) },
+      ...(organisationId ? { organisationId } : {}),
     },
     data: { status: "queued", lockedAt: null },
   });
   const jobs = await db.backgroundJob.findMany({
-    where: { status: "queued", runAt: { lte: new Date() } },
+    where: {
+      status: "queued",
+      runAt: { lte: new Date() },
+      ...(organisationId ? { organisationId } : {}),
+    },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
@@ -152,82 +194,13 @@ export async function processJobs() {
             organisation: { status: "active" },
           },
         });
-        let allowed = !!member;
-        if (member && payload.resourceType === "repair") {
-          const scope =
-            member.role === "TENANT"
-              ? {
-                  OR: [
-                    { reporter: { userId: payload.userId } },
-                    {
-                      grants: { some: { tenant: { userId: payload.userId } } },
-                    },
-                  ],
-                }
-              : member.role === "STAFF" && member.propertyIds.length
-                ? { propertyId: { in: member.propertyIds } }
-                : {};
-          allowed =
-            (member.role === "OWNER" ||
-              member.role === "TENANT" ||
-              (member.role === "STAFF" &&
-                member.permissions.some((p) =>
-                  ["repairs:read", "repairs:write"].includes(p),
-                ))) &&
-            !!(await db.repair.findFirst({
-              where: {
-                id: payload.resourceId,
-                organisationId: job.organisationId,
-                ...scope,
-              },
-            }));
-        }
-        if (member && payload.resourceType === "document") {
-          allowed =
-            (member.role === "OWNER" ||
-              member.role === "TENANT" ||
-              (member.role === "STAFF" &&
-                member.permissions.some((p) =>
-                  ["documents:read", "documents:write"].includes(p),
-                )) ||
-              (member.role === "STAKEHOLDER" &&
-                member.permissions.includes("documents:read"))) &&
-            !!(await db.document.findFirst({
-              where: {
-                id: payload.resourceId,
-                organisationId: job.organisationId,
-                archivedAt: null,
-                ...(member.role === "TENANT"
-                  ? {
-                      visibility: "shared",
-                      grants: { some: { tenant: { userId: payload.userId } } },
-                      OR: [
-                        { repairId: null },
-                        {
-                          repair: {
-                            OR: [
-                              { reporter: { userId: payload.userId } },
-                              {
-                                grants: {
-                                  some: { tenant: { userId: payload.userId } },
-                                },
-                              },
-                            ],
-                          },
-                        },
-                      ],
-                    }
-                  : member.role === "STAKEHOLDER"
-                    ? {
-                        ownerVisible: true,
-                        propertyId: { in: member.propertyIds },
-                      }
-                    : member.role === "STAFF" && member.propertyIds.length
-                      ? { propertyId: { in: member.propertyIds } }
-                      : {}),
-              },
-            }));
-        }
+        const allowed =
+          !!member &&
+          (await canViewNotification(member, {
+            resourceType: payload.resourceType,
+            resourceId: payload.resourceId,
+            dedupeKey: job.dedupeKey,
+          }));
         if (!allowed) {
           await db.backgroundJob.update({
             where: { id: job.id },

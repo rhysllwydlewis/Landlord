@@ -73,6 +73,7 @@ export async function uploadDocument(ctx: Context, form: FormData) {
       category: z.string().min(1).max(100),
       tenantIds: z.array(z.string()).max(100).default([]),
       ownerVisible: z.boolean().default(false),
+      expiresAt: z.iso.date().optional(),
     })
     .parse({
       propertyId: form.get("propertyId") || undefined,
@@ -81,6 +82,7 @@ export async function uploadDocument(ctx: Context, form: FormData) {
       category: form.get("category") || "General",
       ownerVisible: form.get("ownerVisible") === "on",
       tenantIds: JSON.parse(String(form.get("tenantIds") || "[]")),
+      expiresAt: form.get("expiresAt") || undefined,
     });
   if (ctx.role === "TENANT") {
     invariant(
@@ -92,6 +94,7 @@ export async function uploadDocument(ctx: Context, form: FormData) {
     if (input.tenancyId) await checkTenancy(ctx, input.tenancyId, "documents");
     input.tenantIds = ctx.tenantIds;
     input.ownerVisible = false;
+    input.expiresAt = undefined;
     input.propertyId = undefined;
   } else {
     permit(ctx, "documents", true);
@@ -227,6 +230,7 @@ export async function uploadDocument(ctx: Context, form: FormData) {
           uploadedByUserId: ctx.userId,
           visibility: input.tenantIds.length ? "shared" : "private",
           ownerVisible: input.ownerVisible,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
           grants: {
             create: [...new Set(input.tenantIds)].map((tenantId) => ({
               tenantId,
@@ -266,7 +270,11 @@ export async function uploadDocument(ctx: Context, form: FormData) {
   );
   return { id: d.id };
 }
-export async function downloadDocument(ctx: Context, id: string) {
+export async function downloadDocument(
+  ctx: Context,
+  id: string,
+  preview = false,
+) {
   if (ctx.role === "STAKEHOLDER")
     invariant(
       ctx.permissions.includes("documents:read"),
@@ -295,7 +303,12 @@ export async function downloadDocument(ctx: Context, id: string) {
     },
   });
   invariant(d, 404, "Document not found.");
-  await audit(ctx, "document.downloaded", "document", id);
+  await audit(
+    ctx,
+    preview ? "document.previewed" : "document.downloaded",
+    "document",
+    id,
+  );
   let body: Uint8Array;
   if (driver() === "s3") {
     const o = await s3().send(
@@ -311,11 +324,50 @@ export async function downloadDocument(ctx: Context, id: string) {
   return new Response(new Uint8Array(body), {
     headers: {
       "Content-Type": d.contentType,
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(d.name)}`,
+      "Content-Disposition": `${preview ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(d.name)}`,
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy":
+        "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     },
   });
+}
+export async function updateDocumentMetadata(
+  ctx: Context,
+  id: string,
+  raw: unknown,
+) {
+  permit(ctx, "documents", true);
+  await entitlement(ctx, "documents");
+  const input = z
+    .object({ expiresAt: z.iso.date().nullable() })
+    .strict()
+    .parse(raw);
+  const document = await db.document.findFirst({
+    where: {
+      id,
+      organisationId: ctx.organisationId,
+      archivedAt: null,
+      ...linkedPropertyScope(ctx),
+    },
+  });
+  invariant(document, 404, "Document not found.");
+  await db.$transaction(async (tx) => {
+    await tx.document.update({
+      where: { id },
+      data: { expiresAt: input.expiresAt ? new Date(input.expiresAt) : null },
+    });
+    await tx.auditLog.create({
+      data: {
+        organisationId: ctx.organisationId,
+        actorUserId: ctx.userId,
+        action: "document.expiry.updated",
+        resourceType: "document",
+        resourceId: id,
+      },
+    });
+  });
+  return { id };
 }
 export async function shareDocument(ctx: Context, id: string, raw: unknown) {
   permit(ctx, "documents", true);

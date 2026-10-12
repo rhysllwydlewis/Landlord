@@ -1,6 +1,22 @@
 import { z } from "zod";
 const id = z.string().min(1);
 const pence = z.number().int().min(0).max(2000000000);
+export const propertyDetailsSchema = z
+  .object({
+    localAuthority: z.string().trim().max(160).optional(),
+    licenceType: z.string().trim().max(160).optional(),
+    licenceReference: z.string().trim().max(120).optional(),
+    licenceExpiresAt: z.iso.date().nullable().optional(),
+    purchaseDate: z.iso.date().nullable().optional(),
+    mortgageProvider: z.string().trim().max(160).optional(),
+    mortgageReference: z.string().trim().max(120).optional(),
+    mortgageBalancePence: pence.nullable().optional(),
+    mortgagePaymentPence: pence.nullable().optional(),
+    insuranceProvider: z.string().trim().max(160).optional(),
+    insuranceReference: z.string().trim().max(120).optional(),
+    insuranceExpiresAt: z.iso.date().nullable().optional(),
+  })
+  .strict();
 export const propertySchema = z.object({
   name: z.string().trim().min(2).max(120),
   address: z.string().trim().min(5).max(250),
@@ -27,18 +43,34 @@ export const propertySchema = z.object({
   furnishing: z
     .enum(["unfurnished", "part furnished", "furnished"])
     .default("unfurnished"),
-  epcRating: z.enum(["A", "B", "C", "D", "E", "F", "G"]).optional(),
-  purchasePricePence: pence.optional(),
-  valuePence: pence.optional(),
+  epcRating: z.enum(["A", "B", "C", "D", "E", "F", "G"]).nullable().optional(),
+  purchasePricePence: pence.nullable().optional(),
+  valuePence: pence.nullable().optional(),
+  details: propertyDetailsSchema.optional(),
   notes: z.string().max(10000).default(""),
-  portfolioId: id.optional(),
-  ownerId: id.optional(),
+  portfolioId: id.nullable().optional(),
+  ownerId: id.nullable().optional(),
+});
+// Zod 4 applies defaults inside optional fields. PATCH validation must remove
+// creation defaults so omitted values never overwrite existing records.
+export const propertyPatchSchema = propertySchema.partial().extend({
+  jurisdiction: propertySchema.shape.jurisdiction.removeDefault().optional(),
+  bedrooms: propertySchema.shape.bedrooms.removeDefault().optional(),
+  bathrooms: propertySchema.shape.bathrooms.removeDefault().optional(),
+  furnishing: propertySchema.shape.furnishing.removeDefault().optional(),
+  notes: propertySchema.shape.notes.removeDefault().optional(),
 });
 export const tenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.email().transform((s) => s.toLowerCase()),
   phone: z.string().max(30).default(""),
 });
+export const tenantPatchSchema = tenantSchema
+  .partial()
+  .omit({ email: true })
+  .extend({
+    phone: tenantSchema.shape.phone.removeDefault().optional(),
+  });
 export const tenancySchema = z
   .object({
     propertyId: id,
@@ -194,6 +226,24 @@ export const operationSchemas = {
     rating: z.number().int().min(1).max(5).optional(),
     body: z.string().min(5).max(10000),
     response: z.string().max(10000).default(""),
+    responses: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          body: z.string().min(1).max(5000),
+          authorName: z.string().max(120),
+          createdAt: z.iso.datetime(),
+          status: z.enum([
+            "draft",
+            "in progress",
+            "completed",
+            "closed",
+            "cancelled",
+          ]),
+        }),
+      )
+      .max(100)
+      .default([]),
   }),
   passport: z.object({
     source: z.enum(["self-reported", "platform-record"]),

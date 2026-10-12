@@ -20,6 +20,10 @@ export async function GET(
         tenancy: { ...linkedPropertyScope(ctx) },
       },
       include: {
+        responses: {
+          orderBy: { createdAt: "asc" },
+          include: { tenant: { select: { name: true } } },
+        },
         tenancy: {
           include: {
             property: { select: { name: true, address: true } },
@@ -67,6 +71,40 @@ export async function GET(
     line("Scheme " + deposit.scheme + "; reference " + deposit.reference);
     line("Status " + deposit.status);
     line("Scheme information is manually recorded, not provider confirmation.");
+    line(
+      "Tenant responses are recorded positions, not automatic deduction approval.",
+    );
+    for (const response of deposit.responses) {
+      line(
+        `${date(response.createdAt)} - ${response.tenant.name}: ${response.decision}`,
+      );
+      line(response.body);
+      line(`Proposal reference: ${response.proposalHash}`);
+    }
+    await pdf.attach(
+      new TextEncoder().encode(
+        JSON.stringify(
+          {
+            deposit: {
+              amountPence: deposit.amountPence,
+              scheme: deposit.scheme,
+              reference: deposit.reference,
+              status: deposit.status,
+              deductions: deposit.deductions,
+            },
+            tenantResponses: deposit.responses,
+          },
+          null,
+          2,
+        ),
+      ),
+      "recorded-deposit-evidence.json",
+      {
+        mimeType: "application/json",
+        description:
+          "Original recorded text and response history, preserving Unicode characters.",
+      },
+    );
     const deductions = deposit.deductions as {
       description: string;
       amountPence: number;

@@ -39,3 +39,15 @@ Corrections include:
 - Improve narrow-screen caption contrast, use configured branding in homepage metadata and the shared footer, make skip/hash destinations focusable, and remove preview copy referring to a nonexistent photograph.
 
 Regression tests reproduced the access leaks, stale staff grants, broken menu/contrast behaviour and incomplete tab associations before their fixes. Final verification totals and CI evidence are recorded on the PR. The existing implementation and launch limitations still apply.
+
+## Property operations PR review
+
+This pass traced partial updates, repair attachment projections, submission retries and notification authorisation through the services and UI. It reproduced the following issues and added regression coverage:
+
+- Zod 4 creation defaults were being applied to omitted PATCH fields, resetting property specifications/private notes, room types, tenant telephone numbers, profile preferences and repair safety settings. Update schemas now preserve omissions while allowing explicit clearing.
+- Repair-only staff received attachment metadata even though downloads required document permission. Repair detail projections now apply that permission too.
+- A deposit response could be saved successfully, then shown as failed if the history refresh failed. Successful writes now remain acknowledged and release their submission key independently of refreshing the history.
+- Form controls could be edited during an in-flight submission. Shared forms disable their controls until the request finishes.
+- Deposit/feedback alerts and in-app document alerts did not consistently recheck revoked permissions or property restrictions. A shared server-side check now protects the notification centre, unread indicator and queued delivery. Document expiry alerts remain manager-only after role changes.
+
+The integration tests cover preserved records, attachment denials, current notification scopes, document expiry audiences and cancelled queued mail. Browser tests cover hidden restricted alerts and a failed refresh after a successful deposit response, including a subsequent submission. Latest verification totals and CI evidence are recorded in the PR. Existing product and launch limitations remain documented in [IMPLEMENTATION.md](IMPLEMENTATION.md).

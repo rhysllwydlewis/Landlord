@@ -98,7 +98,7 @@ export function Shell({
   userName: string;
   organisation: { id: string; name: string };
   organisations: { id: string; name: string }[];
-  unread: number;
+  unread: boolean;
   admin: boolean;
 }) {
   const pathname = usePathname();
@@ -271,10 +271,10 @@ export function Shell({
             <Link
               href="/app/notifications"
               className="notification-button"
-              aria-label={`Notifications, ${unread} unread`}
+              aria-label={`Notifications, ${unread ? "unread updates" : "no unread updates"}`}
             >
               <Bell size={19} />
-              {unread > 0 && <span />}
+              {unread && <span />}
             </Link>
             <Link href="/app/settings" className="avatar small-avatar">
               {userName[0]}

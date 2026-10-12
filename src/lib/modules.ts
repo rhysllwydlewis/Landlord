@@ -234,6 +234,11 @@ export const modules: Record<string, Module> = {
         type: "checkbox",
         default: true,
       },
+      {
+        name: "estimatedCostPence",
+        label: "Estimated repair cost",
+        type: "money",
+      },
     ],
   },
   rent: {
@@ -525,6 +530,7 @@ export const modules: Record<string, Module> = {
       "size",
       "visibility",
       "createdAt",
+      "expiresAt",
     ],
     fields: [],
   },

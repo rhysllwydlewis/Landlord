@@ -21,16 +21,23 @@ import { repairStatuses } from "@/lib/config";
 import { requestJson } from "@/lib/http";
 import { obj, str, type Row } from "./resource-table";
 import { DocumentUpload, type Options, NewRecord } from "./record-form";
+import { RepairFeedback } from "./feedback-tools";
 export function RepairDetail({
   repair: r,
   options,
   tenant,
   editable,
+  financeEditable,
+  documentEditable,
+  feedbackEnabled,
 }: {
   repair: Row;
   options: Options;
   tenant: boolean;
   editable: boolean;
+  financeEditable: boolean;
+  documentEditable: boolean;
+  feedbackEnabled: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState("");
@@ -55,11 +62,26 @@ export function RepairDetail({
         (n) =>
           n.id === p.tenancyId &&
           n.propertyId === obj(r.property).id &&
-          (!r.unitId || n.unitId === r.unitId),
+          ["active", "periodic", "ending"].includes(n.status || "active") &&
+          (!r.unitId || n.unitId === null || n.unitId === r.unitId),
       ),
     ),
   );
   const grants = ((r.grants as Row[]) || []).map((g) => str(g.tenantId));
+  const progressStage =
+    (
+      {
+        reported: 0,
+        acknowledged: 1,
+        "under review": 1,
+        "in progress": 2,
+        "awaiting parts": 2,
+        "on hold": 2,
+        resolved: 3,
+        closed: 4,
+        cancelled: 0,
+      } as Record<string, number>
+    )[str(r.status)] ?? 0;
   return (
     <>
       <Link href="/app/repairs" className="back-link">
@@ -82,19 +104,18 @@ export function RepairDetail({
           {error}
         </p>
       )}
-      <div className="repair-status-track">
+      <div
+        className="repair-status-track"
+        role="list"
+        aria-label="Repair status progression"
+      >
         {["reported", "acknowledged", "in progress", "resolved", "closed"].map(
           (s, i) => (
             <div
               key={s}
-              className={
-                repairStatuses.indexOf(
-                  r.status as (typeof repairStatuses)[number],
-                ) >=
-                repairStatuses.indexOf(s as (typeof repairStatuses)[number])
-                  ? "done"
-                  : ""
-              }
+              role="listitem"
+              aria-current={i === progressStage ? "step" : undefined}
+              className={i <= progressStage ? "done" : ""}
             >
               <span>{i + 1}</span>
               <strong>{s}</strong>
@@ -114,6 +135,16 @@ export function RepairDetail({
                 </span>
               </div>
               <p className="preserve-text">{str(r.description)}</p>
+              {!!r.issueStartedAt && (
+                <p className="muted small">
+                  Issue first noticed {date(str(r.issueStartedAt))}.
+                </p>
+              )}
+              <p className="muted small">
+                {r.ongoing
+                  ? "Reported as an ongoing issue."
+                  : "Reported as an intermittent or past issue."}
+              </p>
               {!!r.completedAt && (
                 <div className="form-notice">
                   <CheckCircle2 size={18} />
@@ -126,11 +157,13 @@ export function RepairDetail({
           <Panel
             title="Photographs & attachments"
             action={
-              <DocumentUpload
-                options={options}
-                tenant={tenant}
-                fixed={{ repairId: str(r.id) }}
-              />
+              (tenant || documentEditable) && (
+                <DocumentUpload
+                  options={options}
+                  tenant={tenant}
+                  fixed={{ repairId: str(r.id) }}
+                />
+              )
             }
           >
             <div className="attachment-list">
@@ -220,6 +253,14 @@ export function RepairDetail({
               ))}
             </div>
           </Panel>
+          {tenant &&
+            feedbackEnabled &&
+            ["resolved", "closed"].includes(str(r.status)) && (
+              <RepairFeedback
+                repairId={str(r.id)}
+                reference={str(r.reference)}
+              />
+            )}
         </div>
         <div>
           {editable && (
@@ -235,6 +276,11 @@ export function RepairDetail({
                       targetDate: f.get("targetDate") || null,
                       internalNotes: f.get("internalNotes"),
                       completionSummary: f.get("completionSummary"),
+                      completedAt: ["resolved", "closed"].includes(
+                        String(f.get("status")),
+                      )
+                        ? f.get("completedAt") || undefined
+                        : undefined,
                       tenantComments: f.get("tenantComments") === "on",
                     },
                     "PATCH",
@@ -266,6 +312,21 @@ export function RepairDetail({
                       r.targetDate ? str(r.targetDate).slice(0, 10) : ""
                     }
                   />
+                </label>
+                <label className="form-field">
+                  <span>Actual completion date</span>
+                  <input
+                    name="completedAt"
+                    type="date"
+                    max={new Date().toISOString().slice(0, 10)}
+                    defaultValue={
+                      r.completedAt ? str(r.completedAt).slice(0, 10) : ""
+                    }
+                  />
+                  <small>
+                    Set when resolving or closing a repair. Leave blank to use
+                    the recorded date.
+                  </small>
                 </label>
                 <label className="form-field">
                   <span>Private internal notes</span>
@@ -353,7 +414,7 @@ export function RepairDetail({
             <Panel
               title="Repair costs"
               action={
-                editable && (
+                financeEditable && (
                   <NewRecord
                     resource="expenses"
                     options={options}
@@ -363,6 +424,47 @@ export function RepairDetail({
               }
             >
               <div className="record-form">
+                <p className="muted small">
+                  Estimated cost:{" "}
+                  {r.estimatedCostPence == null
+                    ? "Not recorded"
+                    : money(Number(r.estimatedCostPence))}
+                </p>
+                {editable && financeEditable && (
+                  <ClientForm
+                    className="record-form"
+                    action={async (f) => {
+                      await act(
+                        "",
+                        {
+                          estimatedCostPence:
+                            f.get("estimate") === ""
+                              ? null
+                              : Math.round(Number(f.get("estimate")) * 100),
+                        },
+                        "PATCH",
+                      );
+                    }}
+                  >
+                    <label className="form-field">
+                      <span>Estimated repair cost</span>
+                      <input
+                        name="estimate"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={
+                          r.estimatedCostPence == null
+                            ? ""
+                            : Number(r.estimatedCostPence) / 100
+                        }
+                      />
+                    </label>
+                    <button className="button secondary" disabled={busy}>
+                      Save estimate
+                    </button>
+                  </ClientForm>
+                )}
                 <strong className="cost-total">
                   {money(
                     ((r.expenses as Row[]) || []).reduce(
@@ -377,7 +479,16 @@ export function RepairDetail({
                 </p>
                 {((r.expenses as Row[]) || []).map((e) => (
                   <div className="cost-line" key={str(e.id)}>
-                    <span>{str(e.description)}</span>
+                    <span>
+                      {str(e.description)}
+                      <small className="muted">
+                        {str(e.supplier || "")}
+                        {e.invoiceReference
+                          ? ` · Invoice ${e.invoiceReference}`
+                          : ""}{" "}
+                        · {date(str(e.incurredAt))}
+                      </small>
+                    </span>
                     <strong>{money(Number(e.amountPence))}</strong>
                   </div>
                 ))}
@@ -390,6 +501,12 @@ export function RepairDetail({
               Your landlord receives your messages. If there is immediate
               danger, use emergency contacts rather than waiting for a portal
               reply.
+              {options.repairGuidance?.emergencyContact && (
+                <p>
+                  Landlord emergency contact:{" "}
+                  {options.repairGuidance.emergencyContact}
+                </p>
+              )}
             </div>
           )}
         </div>

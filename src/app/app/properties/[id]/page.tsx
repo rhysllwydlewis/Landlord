@@ -4,6 +4,11 @@ import { options, can } from "@/server/dashboard";
 import { repairWhere } from "@/server/repairs";
 import { db } from "@/server/db";
 import { PropertyDetail } from "@/components/property-detail";
+import {
+  financialPropertyDetails,
+  availableUnitScope,
+} from "@/server/properties";
+import type { Prisma } from "@/generated/prisma/client";
 export default async function PropertyPage({
   params,
 }: {
@@ -24,7 +29,17 @@ export default async function PropertyPage({
       ],
     },
     include: {
-      units: true,
+      units: {
+        where:
+          ctx.role === "TENANT"
+            ? availableUnitScope(ctx)
+            : ctx.role === "STAKEHOLDER"
+              ? { archivedAt: null }
+              : {},
+        orderBy: { name: "asc" },
+      },
+      portfolio: { select: { id: true, name: true } },
+      owner: { select: { id: true, name: true } },
       documents: {
         where: {
           archivedAt: null,
@@ -65,7 +80,30 @@ export default async function PropertyPage({
               ? []
               : p.documents,
         }
-      : p;
+      : {
+          ...p,
+          ...(!can(ctx, "finance")
+            ? {
+                purchasePricePence: undefined,
+                valuePence: undefined,
+                details: Object.fromEntries(
+                  Object.entries(p.details as Prisma.JsonObject).filter(
+                    ([key]) => !financialPropertyDetails.some((k) => k === key),
+                  ),
+                ),
+              }
+            : {}),
+          history: await db.auditLog.findMany({
+            where: {
+              organisationId: ctx.organisationId,
+              resourceType: "property",
+              resourceId: id,
+            },
+            orderBy: { createdAt: "desc" },
+            take: 15,
+            select: { id: true, action: true, createdAt: true },
+          }),
+        };
   return (
     <PropertyDetail
       property={JSON.parse(JSON.stringify(data))}

@@ -23,10 +23,16 @@ export type Options = {
     reference: string;
     propertyId: string;
     unitId: string | null;
+    status?: string;
   }[];
   repairs?: { id: string; title: string; propertyId: string }[];
   documents?: { id: string; name: string; propertyId: string | null }[];
   compliance?: { id: string; title: string; propertyId: string }[];
+  portfolios?: { id: string; name: string }[];
+  owners?: { id: string; name: string }[];
+  financeRead?: boolean;
+  financeWrite?: boolean;
+  repairGuidance?: { emergencyContact: string; emergencyGuidance: string };
 };
 const moneyField = (name: string, label: string, def = 0): Field => ({
   name,
@@ -278,7 +284,7 @@ export function FieldInput({
             }
             required={f.required}
             defaultValue={
-              value === undefined
+              value === undefined || value === null || value === ""
                 ? ""
                 : f.type === "money"
                   ? Number(value) / 100
@@ -350,7 +356,20 @@ export function RecordForm({
         "Documents provided",
       ].map((label) => ({ label, completed: false })),
   );
-  const fields = definition.fields.filter((f) => !(fixed && f.name in fixed));
+  const fields = definition.fields.filter(
+    (f) =>
+      !(fixed && f.name in fixed) &&
+      !(
+        resource === "properties" &&
+        options.financeWrite === false &&
+        ["purchasePricePence", "valuePence"].includes(f.name)
+      ) &&
+      !(
+        resource === "repairs" &&
+        f.name === "estimatedCostPence" &&
+        (tenant || options.financeWrite === false)
+      ),
+  );
   function parseFields(fs: Field[], form: FormData) {
     const out: Record<string, unknown> = {};
     for (const f of fs) {
@@ -361,6 +380,15 @@ export function RecordForm({
       const raw = form.get(f.name);
       if (f.type === "multi") out[f.name] = form.getAll(f.name).map(String);
       else if (f.type === "checkbox") out[f.name] = raw === "on";
+      else if (
+        initial?.id &&
+        resource === "properties" &&
+        raw === "" &&
+        ["purchasePricePence", "valuePence", "epcRating", "notes"].includes(
+          f.name,
+        )
+      )
+        out[f.name] = f.name === "notes" ? "" : null;
       else if (raw !== null && raw !== "")
         out[f.name] =
           f.type === "money"
@@ -465,6 +493,17 @@ export function RecordForm({
           For immediate danger, call 999. Suspected gas leak: call the relevant
           gas emergency service. Use your property’s emergency contact for
           urgent repairs. This portal is not continuously monitored.
+          {options.repairGuidance?.emergencyContact && (
+            <p>
+              <strong>Landlord emergency contact:</strong>{" "}
+              {options.repairGuidance.emergencyContact}
+            </p>
+          )}
+          {options.repairGuidance?.emergencyGuidance && (
+            <p className="preserve-text">
+              {options.repairGuidance.emergencyGuidance}
+            </p>
+          )}
         </div>
       )}
       <div className="form-grid">
@@ -885,6 +924,12 @@ export function DocumentUpload({
                   ))}
                 </select>
               </label>
+              {!tenant && (
+                <label className="form-field">
+                  <span>Document expiry (optional)</span>
+                  <input name="expiresAt" type="date" />
+                </label>
+              )}
             </div>
             <label className="upload-zone">
               <Paperclip />

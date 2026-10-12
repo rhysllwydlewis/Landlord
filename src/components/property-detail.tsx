@@ -9,6 +9,7 @@ import { RecordForm, Modal, DocumentUpload, type Options } from "./record-form";
 import { str, type Row } from "./resource-table";
 import { money } from "@/lib/calculations";
 import { requestJson } from "@/lib/http";
+import { PropertyAdministration, UnitActions } from "./property-administration";
 export function PropertyDetail({
   property: p,
   options,
@@ -84,11 +85,11 @@ export function PropertyDetail({
                 <dt>Jurisdiction</dt>
                 <dd>{str(p.jurisdiction)}</dd>
               </div>
-              {!tenant && (
+              {!tenant && options.financeRead && (
                 <div>
                   <dt>Estimated value</dt>
                   <dd>
-                    {p.valuePence
+                    {p.valuePence != null
                       ? money(Number(p.valuePence))
                       : "Not recorded"}
                   </dd>
@@ -111,6 +112,7 @@ export function PropertyDetail({
                   <House size={18} />
                   <strong>{str(u.name)}</strong>
                   <span>{str(u.type)}</span>
+                  {editable && <UnitActions unit={u} />}
                 </div>
               ))}
               {editable && (
@@ -154,6 +156,13 @@ export function PropertyDetail({
               )}
             </div>
           </Panel>
+          {!tenant && (
+            <PropertyAdministration
+              property={p}
+              options={options}
+              editable={editable}
+            />
+          )}
           <Panel
             title="Property photographs & documents"
             action={

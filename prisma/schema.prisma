@@ -207,6 +207,7 @@ model Tenant {
   reportedRepairs Repair[] @relation("Reporter")
   repairGrants RepairAccess[]
   documentGrants DocumentAccess[]
+  depositResponses DepositResponse[]
   @@unique([id,organisationId])
   @@unique([organisationId,email])
   @@index([userId])
@@ -319,6 +320,7 @@ model Repair {
   targetDate DateTime? @db.Date
   completedAt DateTime?
   completionSummary String @default("")
+  estimatedCostPence Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   grants RepairAccess[]
@@ -518,8 +520,25 @@ model Deposit {
   returnedPence Int @default(0)
   notes String @default("")
   deductions Json @default("[]")
+  responses DepositResponse[]
   updatedAt DateTime @updatedAt
   @@unique([tenancyId,organisationId])
+  @@unique([id,organisationId])
+}
+model DepositResponse {
+  id String @id @default(cuid())
+  organisationId String
+  depositId String
+  deposit Deposit @relation(fields:[depositId,organisationId],references:[id,organisationId],onDelete:Cascade,map:"DepositResponse_deposit_fkey")
+  tenantId String
+  tenant Tenant @relation(fields:[tenantId,organisationId],references:[id,organisationId],map:"DepositResponse_tenant_fkey")
+  proposalHash String
+  decision String
+  body String
+  idempotencyKey String
+  createdAt DateTime @default(now())
+  @@unique([organisationId,idempotencyKey])
+  @@index([organisationId,depositId,createdAt])
 }
 model PropertyAsset {
   id String @id @default(cuid())

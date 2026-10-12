@@ -6,7 +6,7 @@ Next.js App Router renders public pages and authenticated workspaces. Better Aut
 
 `src/server/context.ts` derives organisation and role from a verified server session and an active membership. A cookie may select an organisation; it never grants access. Staff permissions distinguish read/write by domain and can restrict properties. Owner/stakeholder access is separately constrained. Platform administration checks an independently stored flag and requires two-factor authentication in production.
 
-Core service domains: repairs, ledger, documents, onboarding/invitations, subscriptions, notifications, imports, reports and background processing. `resources.ts` dispatches typed CRUD for property operations. Shared form definitions and presentation components connect those services to the landlord and tenant portals.
+Core service domains: property administration, repairs, ledger/receipts, deposit responses, feedback, account preferences, documents, onboarding/invitations, subscriptions, notifications, imports, reports and background processing. `resources.ts` dispatches typed CRUD for property operations. Shared form definitions and presentation components connect those services to the landlord and tenant portals.
 
 ## Data model
 
@@ -65,3 +65,15 @@ Branding is in `src/lib/config.ts`; credentials are environment variables. Local
 Due dates are UTC calendar dates; due-today charges are not overdue. Periodic tenancies clear the original term end and keep generating rent. Ending a tenancy cancels only unallocated future scheduled rent, records an audit event, and preserves historical charges and manual charges. Allocated future rent blocks a conflicting rent change or move-out pending manual review; payment reversals and full final-settlement tooling remain documented implementation gaps.
 
 Client API forms use a common submit handler that preserves input after validation/server failures, prevents overlapping submissions, and resets only on an explicit successful result. Conversations initially load the newest 50 messages; earlier history is available through an authorised cursor-based endpoint.
+
+## Property administration and tenant responses
+
+Property record updates validate owner/portfolio links within the current organisation. Mortgage, insurance, purchase and valuation fields require finance permission and entitlement; tenant and stakeholder property responses omit private fields. Room mutations and tenancy creation lock the property row so occupied rooms cannot be archived during concurrent tenancy creation. Tenant room options cover their own occupancy or an explicitly linked whole-property tenancy.
+
+Deposit responses are separate append-only relational records with same-organisation foreign keys. A hash of the current proposal prevents responses to stale amounts/deductions. Idempotency keys protect retries without mutating deduction approvals or returned money. Co-tenants can read only their own response history; authorised managers see the full thread. Evidence exports preserve original Unicode text as an attached JSON record.
+
+Feedback response updates lock the operation record and preserve timestamped manager history when tenants edit their own submissions. Profile and notification preferences merge under a user lock; only owners can configure repair safety contacts and compliance/document reminder lead times. Payment receipts use explicit field projections and tenancy/property permission checks. Preview and download file paths enforce identical access checks and private, no-store responses.
+
+Tenant repair feedback and deposit response controls use the same plan, trial/status and platform-flag checks as their mutation services. Read-only deposit history remains accessible when responses are unavailable. Repair-only and document-only staff receive minimal tenancy choices restricted to their permitted properties.
+
+PATCH schemas remove creation defaults before making fields optional, because Zod 4 otherwise applies defaults to omitted optional fields. Current object permissions are shared between the notification centre, unread indicator and queued delivery for repairs, documents, feedback and deposit response alerts. Successful deposit responses remain acknowledged if the subsequent history refresh fails; their next submission receives a new idempotency key.
