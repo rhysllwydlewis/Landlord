@@ -52,6 +52,30 @@ const docInput = () => {
   return form;
 };
 describe("Room tenancy and completion-date regressions", () => {
+  it("provides scoped tenancy choices to repair-only and document-only staff", async () => {
+    for (const permission of ["repairs:write", "documents:write"]) {
+      const choices = await options({
+        ...f.staff,
+        permissions: [permission],
+        propertyIds: [f.propertyId],
+      });
+      expect(choices.tenancies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: f.tenancyId, status: "active" }),
+        ]),
+      );
+      expect(
+        choices.tenancies.every((t) => t.propertyId === f.propertyId),
+      ).toBe(true);
+      expect(
+        choices.tenants.every((t) =>
+          t.participants.every((p) =>
+            choices.tenancies.some((n) => n.id === p.tenancyId),
+          ),
+        ),
+      ).toBe(true);
+    }
+  });
   it("enforces room limits atomically when archived rooms are restored", async () => {
     const rooms = await Promise.all(
       ["A", "B"].map((name) =>

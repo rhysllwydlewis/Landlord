@@ -311,6 +311,8 @@ export async function options(ctx: Context) {
           : [],
       can(ctx, "tenancies") ||
       can(ctx, "rent") ||
+      can(ctx, "repairs") ||
+      can(ctx, "documents") ||
       can(ctx, "messages") ||
       can(ctx, "operations") ||
       ctx.role === "TENANT"

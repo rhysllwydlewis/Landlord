@@ -1,6 +1,6 @@
 import { db } from "./db";
 import type { Prisma } from "@/generated/prisma/client";
-import { invariant } from "./errors";
+import { AppError, invariant } from "./errors";
 import type { Context } from "./context";
 export async function entitlement(
   ctx: Context,
@@ -49,6 +49,17 @@ export async function entitlement(
   );
   return s;
 }
+export async function featureAvailable(ctx: Context, feature: string) {
+  try {
+    await entitlement(ctx, feature);
+    return true;
+  } catch (error) {
+    if (error instanceof AppError && [402, 403].includes(error.status))
+      return false;
+    throw error;
+  }
+}
+
 export async function checkLimit(
   ctx: Context,
   kind: "property" | "unit" | "staff" | "storage",

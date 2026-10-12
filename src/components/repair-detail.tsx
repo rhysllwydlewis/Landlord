@@ -29,6 +29,7 @@ export function RepairDetail({
   editable,
   financeEditable,
   documentEditable,
+  feedbackEnabled,
 }: {
   repair: Row;
   options: Options;
@@ -36,6 +37,7 @@ export function RepairDetail({
   editable: boolean;
   financeEditable: boolean;
   documentEditable: boolean;
+  feedbackEnabled: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState("");
@@ -251,9 +253,14 @@ export function RepairDetail({
               ))}
             </div>
           </Panel>
-          {tenant && ["resolved", "closed"].includes(str(r.status)) && (
-            <RepairFeedback repairId={str(r.id)} reference={str(r.reference)} />
-          )}
+          {tenant &&
+            feedbackEnabled &&
+            ["resolved", "closed"].includes(str(r.status)) && (
+              <RepairFeedback
+                repairId={str(r.id)}
+                reference={str(r.reference)}
+              />
+            )}
         </div>
         <div>
           {editable && (

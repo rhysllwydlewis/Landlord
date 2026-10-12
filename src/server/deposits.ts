@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { db } from "./db";
 import { permit, linkedPropertyScope, type Context } from "./context";
-import { entitlement } from "./entitlements";
+import { entitlement, featureAvailable } from "./entitlements";
 import { invariant } from "./errors";
 import { notify, managerIds } from "./notifications";
 
@@ -32,14 +32,12 @@ export function depositProposalHash(deposit: Proposal) {
         scheme: deposit.scheme,
         reference: deposit.reference,
         returnedPence: deposit.returnedPence,
-        deductions: deductionsSchema
-          .parse(deposit.deductions)
-          .map((d) => ({
-            description: d.description,
-            amountPence: d.amountPence,
-            accepted: d.accepted,
-            documentIds: [...d.documentIds].sort(),
-          })),
+        deductions: deductionsSchema.parse(deposit.deductions).map((d) => ({
+          description: d.description,
+          amountPence: d.amountPence,
+          accepted: d.accepted,
+          documentIds: [...d.documentIds].sort(),
+        })),
       }),
     )
     .digest("hex");
@@ -80,6 +78,8 @@ export async function getDepositDetail(ctx: Context, id: string) {
   invariant(deposit, 404, "Deposit not found.");
   return {
     id: deposit.id,
+    canRespond:
+      ctx.role === "TENANT" && (await featureAvailable(ctx, "operations")),
     amountPence: deposit.amountPence,
     scheme: deposit.scheme,
     reference: deposit.reference,
@@ -88,13 +88,11 @@ export async function getDepositDetail(ctx: Context, id: string) {
     returnedPence: deposit.returnedPence,
     tenancy: deposit.tenancy,
     proposalHash: depositProposalHash(deposit),
-    deductions: deductionsSchema
-      .parse(deposit.deductions)
-      .map((d) => ({
-        description: d.description,
-        amountPence: d.amountPence,
-        accepted: d.accepted,
-      })),
+    deductions: deductionsSchema.parse(deposit.deductions).map((d) => ({
+      description: d.description,
+      amountPence: d.amountPence,
+      accepted: d.accepted,
+    })),
     responses: deposit.responses,
   };
 }

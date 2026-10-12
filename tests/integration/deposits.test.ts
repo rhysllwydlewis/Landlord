@@ -29,6 +29,38 @@ beforeAll(async () => {
   ).id;
   await updateResource(f.owner, "deposits", depositId, proposal());
 });
+it("keeps deposit information readable while disabling responses excluded by the plan", async () => {
+  const subscription = await db.subscription.findUniqueOrThrow({
+    where: { organisationId: f.owner.organisationId },
+  });
+  const plan = await db.subscriptionPlan.findUniqueOrThrow({
+    where: { id: subscription.planId },
+  });
+  await db.subscriptionPlan.update({
+    where: { id: plan.id },
+    data: {
+      features: plan.features.filter((feature) => feature !== "operations"),
+    },
+  });
+  try {
+    const detail = await getDepositDetail(f.tenant, depositId);
+    expect(detail.canRespond).toBe(false);
+    await expect(
+      respondToDeposit(f.tenant, depositId, {
+        proposalHash: detail.proposalHash,
+        decision: "question",
+        body: "Please explain the proposal.",
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ status: 402 });
+  } finally {
+    await db.subscriptionPlan.update({
+      where: { id: plan.id },
+      data: { features: plan.features },
+    });
+  }
+  expect((await getDepositDetail(f.tenant, depositId)).canRespond).toBe(true);
+});
 afterAll(async () => {
   await db.$disconnect();
 });

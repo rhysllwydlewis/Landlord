@@ -109,7 +109,7 @@ export function DepositResponses({
         </div>
       ))}
       {!responses.length && <p className="muted">No responses recorded yet.</p>}
-      {tenant && (
+      {tenant && !!record.canRespond && (
         <ClientForm
           key={str(record.proposalHash)}
           action={async (f) => {
@@ -157,6 +157,12 @@ export function DepositResponses({
           </p>
           <button className="button primary">Send deposit response</button>
         </ClientForm>
+      )}
+      {tenant && !record.canRespond && (
+        <p className="muted">
+          Portal responses are unavailable under the organisation’s current
+          plan. Contact your landlord to discuss this proposal.
+        </p>
       )}
       {message && (
         <p className="success-message" role="status">

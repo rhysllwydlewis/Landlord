@@ -3,6 +3,7 @@ import { context } from "@/server/context";
 import { options } from "@/server/dashboard";
 import { getRepair } from "@/server/repairs";
 import { RepairDetail } from "@/components/repair-detail";
+import { featureAvailable } from "@/server/entitlements";
 export default async function RepairPage({
   params,
 }: {
@@ -20,6 +21,9 @@ export default async function RepairPage({
       repair={JSON.parse(JSON.stringify(repair))}
       options={await options(ctx)}
       tenant={ctx.role === "TENANT"}
+      feedbackEnabled={
+        ctx.role === "TENANT" && (await featureAvailable(ctx, "operations"))
+      }
       financeEditable={
         ctx.role === "OWNER" ||
         (ctx.role === "STAFF" && ctx.permissions.includes("finance:write"))

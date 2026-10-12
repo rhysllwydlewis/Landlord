@@ -48,6 +48,26 @@ async function seededTenant() {
     select: { id: true },
   });
 }
+async function withoutOperations(run: () => Promise<void>) {
+  const subscription = await db.subscription.findUniqueOrThrow({
+    where: { organisationId: seed.records.organisationId },
+    include: { plan: true },
+  });
+  await db.subscriptionPlan.update({
+    where: { id: subscription.planId },
+    data: {
+      features: subscription.plan.features.filter((f) => f !== "operations"),
+    },
+  });
+  try {
+    await run();
+  } finally {
+    await db.subscriptionPlan.update({
+      where: { id: subscription.planId },
+      data: { features: subscription.plan.features },
+    });
+  }
+}
 
 test("property records, unit edits and archive/restore persist without leaking financial information", async ({
   browser,
@@ -271,6 +291,18 @@ test("shared repair estimates stay private while completion feedback and landlor
     `/api/workspace/feedback?q=${encodeURIComponent(repair.reference!)}`,
   );
   expect((await hidden.json()).rows).toHaveLength(0);
+  await withoutOperations(async () => {
+    await tenant.page.goto(`/app/repairs/${repair.id}`);
+    await expect(
+      tenant.page.getByRole("heading", {
+        name: "How was your repair handled?",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      tenant.page.getByRole("button", { name: "Submit repair feedback" }),
+    ).toHaveCount(0);
+  });
   await landlord.context.close();
   await tenant.context.close();
   await other.context.close();
@@ -621,6 +653,18 @@ test("joint tenants can respond privately to deposit proposals and must review c
   expect(
     (await PDFDocument.load(await evidence.body())).getPageCount(),
   ).toBeGreaterThan(0);
+  await withoutOperations(async () => {
+    await tenant.page.goto(`/app/deposits?propertyId=${property.id}`);
+    await tenant.page
+      .getByRole("button", { name: "View proposal & responses" })
+      .click();
+    await expect(
+      tenant.page.getByText(/Portal responses are unavailable/),
+    ).toBeVisible();
+    await expect(
+      tenant.page.getByRole("button", { name: "Send deposit response" }),
+    ).toHaveCount(0);
+  });
   await landlord.context.close();
   await tenant.context.close();
   await other.context.close();
