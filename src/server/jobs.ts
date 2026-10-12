@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { db } from "./db";
 import { generateRent } from "./ledger";
-import { outstanding } from "@/lib/calculations";
+import { outstanding, utcDay } from "@/lib/calculations";
 import { notify, managerIds } from "./notifications";
 import type { Context } from "./context";
 import { invariant } from "./errors";
@@ -42,7 +42,7 @@ export async function schedule(now = new Date()) {
         );
     }
     const rent = await db.rentObligation.findMany({
-      where: { organisationId: org.id, dueDate: { lt: now } },
+      where: { organisationId: org.id, dueDate: { lt: utcDay(now) } },
       include: {
         allocations: true,
         tenancy: { include: { participants: { include: { tenant: true } } } },
@@ -149,6 +149,7 @@ export async function processJobs() {
             organisationId: job.organisationId,
             userId: payload.userId,
             active: true,
+            organisation: { status: "active" },
           },
         });
         let allowed = !!member;
@@ -182,41 +183,50 @@ export async function processJobs() {
             }));
         }
         if (member && payload.resourceType === "document") {
-          allowed = !!(await db.document.findFirst({
-            where: {
-              id: payload.resourceId,
-              organisationId: job.organisationId,
-              archivedAt: null,
-              ...(member.role === "TENANT"
-                ? {
-                    visibility: "shared",
-                    grants: { some: { tenant: { userId: payload.userId } } },
-                    OR: [
-                      { repairId: null },
-                      {
-                        repair: {
-                          OR: [
-                            { reporter: { userId: payload.userId } },
-                            {
-                              grants: {
-                                some: { tenant: { userId: payload.userId } },
-                              },
-                            },
-                          ],
-                        },
-                      },
-                    ],
-                  }
-                : member.role === "STAKEHOLDER"
+          allowed =
+            (member.role === "OWNER" ||
+              member.role === "TENANT" ||
+              (member.role === "STAFF" &&
+                member.permissions.some((p) =>
+                  ["documents:read", "documents:write"].includes(p),
+                )) ||
+              (member.role === "STAKEHOLDER" &&
+                member.permissions.includes("documents:read"))) &&
+            !!(await db.document.findFirst({
+              where: {
+                id: payload.resourceId,
+                organisationId: job.organisationId,
+                archivedAt: null,
+                ...(member.role === "TENANT"
                   ? {
-                      ownerVisible: true,
-                      propertyId: { in: member.propertyIds },
+                      visibility: "shared",
+                      grants: { some: { tenant: { userId: payload.userId } } },
+                      OR: [
+                        { repairId: null },
+                        {
+                          repair: {
+                            OR: [
+                              { reporter: { userId: payload.userId } },
+                              {
+                                grants: {
+                                  some: { tenant: { userId: payload.userId } },
+                                },
+                              },
+                            ],
+                          },
+                        },
+                      ],
                     }
-                  : member.role === "STAFF" && member.propertyIds.length
-                    ? { propertyId: { in: member.propertyIds } }
-                    : {}),
-            },
-          }));
+                  : member.role === "STAKEHOLDER"
+                    ? {
+                        ownerVisible: true,
+                        propertyId: { in: member.propertyIds },
+                      }
+                    : member.role === "STAFF" && member.propertyIds.length
+                      ? { propertyId: { in: member.propertyIds } }
+                      : {}),
+              },
+            }));
         }
         if (!allowed) {
           await db.backgroundJob.update({

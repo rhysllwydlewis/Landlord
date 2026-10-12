@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -74,7 +75,7 @@ export function AuthForm({
               {success}
             </div>
           ) : (
-            <form
+            <ClientForm
               action={async (f) => {
                 setBusy(true);
                 setError("");
@@ -193,7 +194,7 @@ export function AuthForm({
                       ? "Send reset link"
                       : "Update password"}
               </button>
-            </form>
+            </ClientForm>
           )}
           <div className="auth-switch">
             {mode === "login" ? (

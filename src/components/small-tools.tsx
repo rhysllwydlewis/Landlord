@@ -1,11 +1,12 @@
 "use client";
+import { ClientForm } from "./client-form";
 import { useState } from "react";
 import { requestJson } from "@/lib/http";
 export function EntityForms() {
   const [message, setMessage] = useState("");
   return (
     <>
-      <form
+      <ClientForm
         className="inline-form"
         action={async (f) => {
           try {
@@ -29,7 +30,7 @@ export function EntityForms() {
           required
         />
         <button className="button secondary">Create</button>
-      </form>
+      </ClientForm>
       {message && <p role="status">{message}</p>}
     </>
   );
@@ -37,7 +38,7 @@ export function EntityForms() {
 export function AnomalyReview({ id }: { id: string }) {
   const [message, setMessage] = useState("");
   return (
-    <form
+    <ClientForm
       className="inline-form"
       action={async (f) => {
         try {
@@ -68,6 +69,6 @@ export function AnomalyReview({ id }: { id: string }) {
       />
       <button className="button secondary">Save review</button>
       {message && <span role="status">{message}</span>}
-    </form>
+    </ClientForm>
   );
 }

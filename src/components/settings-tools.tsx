@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -13,18 +14,24 @@ export function SettingsForm({
   name,
   organisationName,
   owner,
+  emailUpdates,
 }: {
   name: string;
   organisationName: string;
   owner: boolean;
+  emailUpdates: boolean;
 }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [preferenceMessage, setPreferenceMessage] = useState("");
+  const [preferenceError, setPreferenceError] = useState("");
+  const [securityMessage, setSecurityMessage] = useState("");
+  const [securityError, setSecurityError] = useState("");
   const router = useRouter();
   return (
     <>
       <Panel title="Profile & organisation">
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             try {
@@ -73,10 +80,10 @@ export function SettingsForm({
               {error}
             </p>
           )}
-        </form>
+        </ClientForm>
       </Panel>
       <Panel title="Account security">
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             const r = await authClient.changePassword({
@@ -85,9 +92,11 @@ export function SettingsForm({
               revokeOtherSessions: true,
             });
             if (r.error)
-              setError(r.error.message || "Unable to update password.");
+              setSecurityError(r.error.message || "Unable to update password.");
             else
-              setMessage("Password updated. Other sessions have been revoked.");
+              setSecurityMessage(
+                "Password updated. Other sessions have been revoked.",
+              );
           }}
         >
           <div className="form-grid">
@@ -112,25 +121,37 @@ export function SettingsForm({
             </label>
           </div>
           <button className="button secondary">Change password</button>
-        </form>
+          {securityMessage && (
+            <p className="success-message" role="status">
+              {securityMessage}
+            </p>
+          )}
+          {securityError && (
+            <p className="error-message" role="alert">
+              {securityError}
+            </p>
+          )}
+        </ClientForm>
       </Panel>
       <TwoFactorSetup />
       <Panel title="Notification preferences">
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             try {
               await requestJson("/api/settings", "PATCH", {
                 notificationPreferences: { email: f.get("email") === "on" },
               });
-              setMessage("Preferences saved.");
+              setPreferenceMessage("Preferences saved.");
+              setPreferenceError("");
+              router.refresh();
             } catch (e) {
-              setError((e as Error).message);
+              setPreferenceError((e as Error).message);
             }
           }}
         >
           <label className="checkbox-field">
-            <input name="email" type="checkbox" defaultChecked />
+            <input name="email" type="checkbox" defaultChecked={emailUpdates} />
             Email me about routine portal updates
           </label>
           <p className="muted small">
@@ -138,7 +159,17 @@ export function SettingsForm({
             transactional messages.
           </p>
           <button className="button secondary">Save preferences</button>
-        </form>
+          {preferenceMessage && (
+            <p className="success-message" role="status">
+              {preferenceMessage}
+            </p>
+          )}
+          {preferenceError && (
+            <p className="error-message" role="alert">
+              {preferenceError}
+            </p>
+          )}
+        </ClientForm>
       </Panel>
       <Panel title="Privacy & data requests">
         <div className="record-form">
@@ -185,7 +216,7 @@ export function TeamTools({
         title="Invite staff or property owners"
         subtitle="Staff receive granular permissions. Owner access is limited to selected properties."
       >
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             try {
@@ -272,7 +303,7 @@ export function TeamTools({
               {success}
             </p>
           )}
-        </form>
+        </ClientForm>
       </Panel>
       <Panel title="Current team">
         <div className="record-form">
@@ -314,7 +345,7 @@ export function TeamTools({
                 <summary>
                   Edit access for {String((m.user as Row).name)}
                 </summary>
-                <form
+                <ClientForm
                   action={async (f) => {
                     try {
                       await requestJson("/api/team", "PATCH", {
@@ -388,7 +419,7 @@ export function TeamTools({
                     Active membership
                   </label>
                   <button className="button secondary">Save access</button>
-                </form>
+                </ClientForm>
               </details>
             ))}
         </div>
@@ -429,7 +460,7 @@ export function BillingButtons({
               Open Stripe customer portal
             </button>
           )}
-          <form
+          <ClientForm
             className="inline-form"
             action={async (f) => {
               try {
@@ -462,7 +493,7 @@ export function BillingButtons({
             <button className="button primary" disabled={!plans.length}>
               Continue to Stripe
             </button>
-          </form>
+          </ClientForm>
         </>
       ) : (
         <p className="form-notice">

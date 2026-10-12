@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { ClientForm } from "./client-form";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { X, Plus, LoaderCircle, Paperclip, ShieldCheck } from "lucide-react";
 import { modules, type Field } from "@/lib/modules";
@@ -315,6 +316,7 @@ export function RecordForm({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const submissionKey = useRef<string | null>(null);
   const [propertyId, setPropertyId] = useState(
     String(
       initial?.propertyId ||
@@ -377,22 +379,26 @@ export function RecordForm({
         ...parseFields(fields, form),
         ...fixed,
       };
-      if (["payments", "rent"].includes(resource))
-        payload.idempotencyKey = crypto.randomUUID();
+      if (["payments", "rent"].includes(resource)) {
+        submissionKey.current ??= crypto.randomUUID();
+        payload.idempotencyKey = submissionKey.current;
+      }
       if (operationFields[resource]) {
         const extra = parseFields(operationFields[resource], form);
         if (resource === "inventories") {
           extra.items = items;
-          extra.acknowledged = false;
+          extra.acknowledged = editId ? !!data.acknowledged : false;
         }
         if (resource === "transitions") extra.checklist = checks;
         if (resource === "passport") {
           extra.source = "self-reported";
         }
         if (resource === "feedback") {
-          extra.response = tenant ? "" : String(data.response || "");
+          extra.response = String(data.response || "");
         }
-        payload = editId ? { data: extra } : { ...payload, data: extra };
+        payload = editId
+          ? { data: { ...data, ...extra } }
+          : { ...payload, data: extra };
       }
       const result = savedId
         ? { id: savedId }
@@ -436,7 +442,7 @@ export function RecordForm({
     }
   }
   return (
-    <form
+    <ClientForm
       action={submit}
       className="record-form"
       onChange={(e) => {
@@ -694,7 +700,7 @@ export function RecordForm({
               : `Save ${definition.singular}`}
         </button>
       </div>
-    </form>
+    </ClientForm>
   );
 }
 export function NewRecord({
@@ -818,7 +824,7 @@ export function DocumentUpload({
       </button>
       {open && (
         <Modal title="Upload document" onClose={() => setOpen(false)}>
-          <form
+          <ClientForm
             className="record-form"
             action={async (f) => {
               setBusy(true);
@@ -924,7 +930,7 @@ export function DocumentUpload({
                 {busy ? "Uploading…" : "Upload securely"}
               </button>
             </div>
-          </form>
+          </ClientForm>
         </Modal>
       )}
     </>

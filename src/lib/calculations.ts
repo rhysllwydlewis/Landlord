@@ -11,6 +11,12 @@ export const date = (value: string | Date | null | undefined) =>
         timeZone: "UTC",
       }).format(new Date(value))
     : "—";
+// Ledger due dates are calendar dates, so a charge due today is not overdue.
+export function utcDay(value = new Date()) {
+  return new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
+  );
+}
 export function outstanding(
   amountPence: number,
   allocations: { amountPence: number }[],

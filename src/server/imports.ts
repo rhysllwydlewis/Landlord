@@ -239,6 +239,16 @@ export async function commitImport(ctx: Context, id: string) {
           case "tenancies": {
             const { tenantIds, ...x } = tenancySchema.parse(raw);
             await checkProperty(ctx, x.propertyId, "tenancies");
+            await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${x.propertyId} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+            invariant(
+              !(
+                await tx.property.findUniqueOrThrow({
+                  where: { id: x.propertyId },
+                })
+              ).archivedAt,
+              409,
+              "Archived properties cannot receive new tenancies.",
+            );
             invariant(
               (await tx.tenant.count({
                 where: {
@@ -278,6 +288,7 @@ export async function commitImport(ctx: Context, id: string) {
             record = await tx.tenancy.create({
               data: {
                 ...x,
+                initialRentPence: x.rentPence,
                 organisationId: ctx.organisationId,
                 startDate: new Date(x.startDate),
                 endDate: x.endDate ? new Date(x.endDate) : undefined,

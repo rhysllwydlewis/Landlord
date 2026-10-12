@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import { useState } from "react";
 import { modules } from "@/lib/modules";
 import { requestJson } from "@/lib/http";
@@ -20,7 +21,7 @@ export function ImportTool() {
       title="Import a CSV spreadsheet"
       subtitle="Map columns, review the preview, then commit a validated batch."
     >
-      <form
+      <ClientForm
         className="record-form"
         action={async (f) => {
           setBusy(true);
@@ -128,7 +129,7 @@ export function ImportTool() {
         <button className="button primary" disabled={busy || !csv}>
           {busy ? "Validating…" : "Preview import"}
         </button>
-      </form>
+      </ClientForm>
       {preview && (
         <div className="record-form">
           <h3>Preview: {preview.preview.length} rows</h3>

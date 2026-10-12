@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import { useState } from "react";
 import { requestJson } from "@/lib/http";
 export function ApplicationForm({ listingId }: { listingId: string }) {
@@ -10,7 +11,7 @@ export function ApplicationForm({ listingId }: { listingId: string }) {
       {success}
     </p>
   ) : (
-    <form
+    <ClientForm
       className="record-form"
       action={async (f) => {
         setBusy(true);
@@ -69,6 +70,6 @@ export function ApplicationForm({ listingId }: { listingId: string }) {
       <button className="button primary" disabled={busy}>
         {busy ? "Submitting…" : "Send enquiry"}
       </button>
-    </form>
+    </ClientForm>
   );
 }

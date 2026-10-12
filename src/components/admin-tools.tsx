@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { requestJson } from "@/lib/http";
@@ -29,7 +30,7 @@ export function AdminTools() {
         </p>
       )}
       <Panel title="Create a subscription plan">
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             await save("plan", {
@@ -104,13 +105,13 @@ export function AdminTools() {
             Development only
           </label>
           <button className="button primary">Create plan</button>
-        </form>
+        </ClientForm>
       </Panel>
       <Panel
         title="Add a versioned compliance rule"
         subtitle="Rules require source material and explicit review before activation."
       >
-        <form
+        <ClientForm
           className="record-form"
           action={async (f) => {
             await save("rule", {
@@ -188,10 +189,10 @@ export function AdminTools() {
             Activate rule
           </label>
           <button className="button primary">Save rule version</button>
-        </form>
+        </ClientForm>
       </Panel>
       <Panel title="Feature flags">
-        <form
+        <ClientForm
           className="record-form inline-form"
           action={async (f) =>
             save("setting", {
@@ -212,7 +213,7 @@ export function AdminTools() {
             Enabled
           </label>
           <button className="button secondary">Save flag</button>
-        </form>
+        </ClientForm>
       </Panel>
     </>
   );

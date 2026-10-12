@@ -31,3 +31,9 @@ Define the controller, lawful bases, processor contracts, retention periods by r
 ## Test artefacts
 
 Playwright traces can contain session cookies, development passwords, emails and verification links. They stay local and ignored. Do not publish traces without redaction. The seed uses generated local-only credentials and `.example.test` addresses. Production seeding is prohibited.
+
+## Record lookup and recipient review
+
+Single-record checks intersect the requested identifier with organisation and role scopes. Scope filters must never overwrite a supplied identifier. Regression tests cover restricted staff attempting a different organisation's property update, tenants attempting document uploads against another tenancy, and read-only owners supplying unauthorised property filters.
+
+Document property/tenancy/repair links must be coherent. Tenant document recipients must also be authorised to access a linked repair. Revoking file access removes related in-app notifications; queued emails recheck current membership, organisation status, feature permission and object access before delivery. Rental passport entries are private to their author until they selectively export them.

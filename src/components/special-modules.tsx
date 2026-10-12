@@ -91,6 +91,9 @@ export async function SpecialModule({
       </>
     );
   if (module === "settings") {
+    const preference = await db.operationRecord.findUnique({
+      where: { id: `preferences:${ctx.userId}:${ctx.organisationId}` },
+    });
     const org = await db.organisation.findUniqueOrThrow({
       where: { id: ctx.organisationId },
       select: { name: true },
@@ -114,6 +117,10 @@ export async function SpecialModule({
               name={ctx.name}
               organisationName={org.name}
               owner={ctx.role === "OWNER"}
+              emailUpdates={
+                (preference?.data as { email?: boolean } | undefined)?.email !==
+                false
+              }
             />
             {ctx.role === "OWNER" && (
               <Panel title="Portfolios & ownership">

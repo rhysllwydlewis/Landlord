@@ -43,6 +43,7 @@ export async function billingAction(ctx: Context, raw: unknown) {
     await audit(ctx, "billing.portal.opened", "subscription", s.id);
     return { url: portal.url };
   }
+  invariant(x.planId, 422, "Select a subscription plan.");
   const plan = await db.subscriptionPlan.findFirst({
     where: { id: x.planId, active: true, developmentOnly: false },
   });
@@ -53,7 +54,8 @@ export async function billingAction(ctx: Context, raw: unknown) {
       : plan.stripeAnnualPriceId;
   invariant(price, 503, "This plan has no Stripe price configured.");
   invariant(
-    !s.stripeSubscriptionId,
+    !s.stripeSubscriptionId ||
+      ["canceled", "incomplete_expired"].includes(s.status),
     409,
     "Manage your existing subscription through the customer portal.",
   );
@@ -76,7 +78,12 @@ export async function billingAction(ctx: Context, raw: unknown) {
     success_url: `${returnUrl}?returned=1`,
     cancel_url: returnUrl,
     metadata: { organisationId: ctx.organisationId },
-    subscription_data: { metadata: { organisationId: ctx.organisationId } },
+    subscription_data: {
+      metadata: { organisationId: ctx.organisationId },
+      ...(plan.trialDays > 0 && s.provider !== "stripe"
+        ? { trial_period_days: plan.trialDays }
+        : {}),
+    },
   });
   await audit(ctx, "billing.checkout.created", "subscription", s.id);
   return { url: checkout.url };
@@ -102,7 +109,9 @@ export async function stripeWebhook(body: string, signature: string) {
     return { received: true };
   let subscription: Stripe.Subscription | undefined;
   if (event.type.startsWith("customer.subscription."))
-    subscription = event.data.object as Stripe.Subscription;
+    subscription = await stripe.subscriptions.retrieve(
+      (event.data.object as Stripe.Subscription).id,
+    );
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     if (typeof session.subscription === "string")
@@ -117,6 +126,7 @@ export async function stripeWebhook(body: string, signature: string) {
       });
       if (subscription) {
         const orgId = subscription.metadata.organisationId;
+        invariant(orgId, 422, "Subscription organisation metadata is missing.");
         const customer =
           typeof subscription.customer === "string"
             ? subscription.customer
@@ -125,7 +135,30 @@ export async function stripeWebhook(body: string, signature: string) {
           where: { organisationId: orgId, stripeCustomerId: customer },
         });
         if (!record) return;
+        // A delayed event from an old cancelled subscription must not replace
+        // the organisation's new active subscription.
+        if (
+          record.stripeSubscriptionId &&
+          record.stripeSubscriptionId !== subscription.id &&
+          !["canceled", "incomplete_expired"].includes(record.status)
+        ) {
+          await tx.auditLog.create({
+            data: {
+              organisationId: orgId,
+              actorUserId: "stripe",
+              action: "subscription.other.event.ignored",
+              resourceType: "subscription",
+              resourceId: record.id,
+              metadata: {
+                eventId: event.id,
+                providerSubscriptionId: subscription.id,
+              },
+            },
+          });
+          return;
+        }
         const price = subscription.items.data[0]?.price.id;
+        invariant(price, 422, "Subscription price is missing.");
         const plan = await tx.subscriptionPlan.findFirst({
           where: {
             developmentOnly: false,

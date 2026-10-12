@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -96,8 +97,10 @@ export function ResourceTable({
     try {
       await requestJson(`/api/workspace/${resource}/${id}`, "PATCH", data);
       router.refresh();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     }
   };
   if (!rows.length)
@@ -119,18 +122,13 @@ export function ResourceTable({
                 <small>{str(obj(r.tenancy).reference)}</small>
               </div>
             </div>
-            <div className="message-list">
-              {(r.messages as Row[]).map((message) => (
-                <div key={str(message.id)} className="message-bubble">
-                  <strong>{str(message.senderName)}</strong>
-                  <p>{str(message.body)}</p>
-                  <small>{date(message.createdAt as string)}</small>
-                </div>
-              ))}
-            </div>
-            <form
+            <MessageHistory
+              conversationId={str(r.id)}
+              recent={r.messages as Row[]}
+            />
+            <ClientForm
               action={async (f) => {
-                await patch(str(r.id), { body: String(f.get("body")) });
+                return patch(str(r.id), { body: String(f.get("body")) });
               }}
               className="reply-form"
             >
@@ -149,7 +147,7 @@ export function ResourceTable({
               >
                 Mark read
               </button>
-            </form>
+            </ClientForm>
           </section>
         ))}
         {error && (
@@ -405,7 +403,7 @@ export function ResourceTable({
           onClose={() => setSelected(null)}
         >
           {mode === "invite" ? (
-            <form
+            <ClientForm
               className="record-form"
               action={async () => {
                 setBusy(true);
@@ -432,9 +430,9 @@ export function ResourceTable({
               <button className="button primary" disabled={busy}>
                 {busy ? "Sending…" : "Send invitation"}
               </button>
-            </form>
+            </ClientForm>
           ) : mode === "share" ? (
-            <form
+            <ClientForm
               className="record-form"
               action={async (f) => {
                 try {
@@ -464,15 +462,22 @@ export function ResourceTable({
               <div className="multi-options">
                 {options.tenants.map((t) => (
                   <label key={t.id}>
-                    <input name="tenantIds" type="checkbox" value={t.id} />
+                    <input
+                      name="tenantIds"
+                      type="checkbox"
+                      value={t.id}
+                      defaultChecked={(
+                        (selected.grants as { tenantId: string }[]) || []
+                      ).some((g) => g.tenantId === t.id)}
+                    />
                     {t.name}
                   </label>
                 ))}
               </div>
               <button className="button primary">Save access</button>
-            </form>
+            </ClientForm>
           ) : mode === "rent-change" ? (
-            <form
+            <ClientForm
               className="record-form"
               action={async (f) => {
                 try {
@@ -521,27 +526,28 @@ export function ResourceTable({
                 reviewed the applicable requirements
               </label>
               <button className="button primary">Record rent change</button>
-            </form>
+            </ClientForm>
           ) : mode === "deposit" ? (
             <DepositForm
               row={selected}
               onSave={async (data) => {
-                await patch(str(selected.id), data);
-                setSelected(null);
+                if (await patch(str(selected.id), data)) setSelected(null);
               }}
             />
           ) : (
             <div className="record-form">
               <OperationDetail resource={resource} row={selected} />
               {tenant && resource === "inventories" && (
-                <form
+                <ClientForm
                   className="inline-form"
                   action={async (f) => {
-                    await patch(str(selected.id), {
-                      acknowledge: true,
-                      comment: f.get("comment"),
-                    });
-                    setSelected(null);
+                    if (
+                      await patch(str(selected.id), {
+                        acknowledge: true,
+                        comment: f.get("comment"),
+                      })
+                    )
+                      setSelected(null);
                   }}
                 >
                   <input
@@ -552,7 +558,7 @@ export function ResourceTable({
                   <button className="button primary">
                     Acknowledge inventory
                   </button>
-                </form>
+                </ClientForm>
               )}
               {editable && (
                 <>
@@ -569,8 +575,10 @@ export function ResourceTable({
                   <button
                     className="button secondary"
                     onClick={async () => {
-                      await patch(str(selected.id), { status: "completed" });
-                      setSelected(null);
+                      if (
+                        await patch(str(selected.id), { status: "completed" })
+                      )
+                        setSelected(null);
                     }}
                   >
                     Mark completed
@@ -587,6 +595,64 @@ export function ResourceTable({
         </Modal>
       )}
     </>
+  );
+}
+function MessageHistory({
+  conversationId,
+  recent,
+}: {
+  conversationId: string;
+  recent: Row[];
+}) {
+  const [history, setHistory] = useState<Row[]>([]);
+  const [hasMore, setHasMore] = useState(recent.length === 50);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const messages = [
+    ...new Map([...history, ...recent].map((m) => [str(m.id), m])).values(),
+  ];
+  return (
+    <div className="message-list">
+      {hasMore && (
+        <button
+          className="button secondary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError("");
+            try {
+              const result = await requestJson<{
+                messages: Row[];
+                hasMore: boolean;
+              }>(
+                `/api/conversations/${conversationId}/messages?before=${encodeURIComponent(str(messages[0]?.id))}`,
+                "GET",
+              );
+              setHistory([...result.messages, ...messages]);
+              setHasMore(result.hasMore);
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "Loading…" : "Load earlier messages"}
+        </button>
+      )}
+      {error && (
+        <p className="error-message" role="alert">
+          {error}
+        </p>
+      )}
+      {messages.map((message) => (
+        <div key={str(message.id)} className="message-bubble">
+          <strong>{str(message.senderName)}</strong>
+          <p>{str(message.body)}</p>
+          <small>{date(message.createdAt as string)}</small>
+        </div>
+      ))}
+    </div>
   );
 }
 function DepositForm({
@@ -606,7 +672,7 @@ function DepositForm({
     }[]) || [],
   );
   return (
-    <form
+    <ClientForm
       className="record-form"
       action={async (f) => {
         await onSave({
@@ -769,7 +835,7 @@ function DepositForm({
       <div className="form-footer">
         <button className="button primary">Save deposit record</button>
       </div>
-    </form>
+    </ClientForm>
   );
 }
 export function OperationDetail({

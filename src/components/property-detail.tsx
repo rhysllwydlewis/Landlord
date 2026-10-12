@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -113,7 +114,7 @@ export function PropertyDetail({
                 </div>
               ))}
               {editable && (
-                <form
+                <ClientForm
                   className="inline-form"
                   action={async (f) => {
                     try {
@@ -123,6 +124,7 @@ export function PropertyDetail({
                         type: f.get("type"),
                       });
                       router.refresh();
+                      return true;
                     } catch (e) {
                       setError((e as Error).message);
                     }
@@ -143,7 +145,7 @@ export function PropertyDetail({
                     <Plus size={14} />
                     Add unit
                   </button>
-                </form>
+                </ClientForm>
               )}
               {error && (
                 <p className="error-message" role="alert">

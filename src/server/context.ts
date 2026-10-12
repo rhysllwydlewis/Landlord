@@ -112,7 +112,11 @@ export async function checkProperty(
 ) {
   permit(ctx, domain, write);
   const p = await db.property.findFirst({
-    where: { id, organisationId: ctx.organisationId, ...propertyScope(ctx) },
+    where: {
+      id,
+      organisationId: ctx.organisationId,
+      AND: [propertyScope(ctx)],
+    },
   });
   invariant(p, 404, "Property not found.");
   return p;
@@ -134,7 +138,9 @@ export async function checkTenancy(
       id,
       organisationId: ctx.organisationId,
       ...linkedPropertyScope(ctx),
-      ...(ctx.role === "TENANT" ? { id: { in: ctx.tenancyIds } } : {}),
+      ...(ctx.role === "TENANT"
+        ? { AND: [{ id: { in: ctx.tenancyIds } }] }
+        : {}),
     },
     include: { participants: { include: { tenant: true } } },
   });

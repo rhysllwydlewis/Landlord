@@ -50,18 +50,21 @@ export async function GET(request: Request) {
       let page = pdf.addPage([595, 842]);
       let y = 790;
       const draw = (line: string) => {
-        if (y < 60) {
-          page = pdf.addPage([595, 842]);
-          y = 790;
+        const text = line.replace(/[^\x20-\x7E]/g, " ");
+        for (let offset = 0; offset < Math.max(1, text.length); offset += 85) {
+          if (y < 60) {
+            page = pdf.addPage([595, 842]);
+            y = 790;
+          }
+          page.drawText(text.slice(offset, offset + 85), {
+            x: 40,
+            y,
+            size: 10,
+            font,
+            color: rgb(0.15, 0.2, 0.18),
+          });
+          y -= 18;
         }
-        page.drawText(line.replace(/[^\x20-\x7E]/g, " ").slice(0, 110), {
-          x: 40,
-          y,
-          size: 10,
-          font,
-          color: rgb(0.15, 0.2, 0.18),
-        });
-        y -= 18;
       };
       draw(brand.name + " - " + resource);
       draw(basis);

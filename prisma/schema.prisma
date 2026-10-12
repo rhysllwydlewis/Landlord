@@ -223,6 +223,7 @@ model Tenancy {
   endDate DateTime? @db.Date
   status String @default("active")
   rentPence Int
+  initialRentPence Int
   frequency String @default("monthly")
   dueDay Int @default(1)
   depositPence Int @default(0)

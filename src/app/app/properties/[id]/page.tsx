@@ -16,8 +16,12 @@ export default async function PropertyPage({
     where: {
       id,
       organisationId: ctx.organisationId,
-      ...propertyScope(ctx),
-      ...(ctx.role === "TENANT" ? { id: { in: ctx.activePropertyIds } } : {}),
+      AND: [
+        propertyScope(ctx),
+        ...(ctx.role === "TENANT"
+          ? [{ id: { in: ctx.activePropertyIds } }]
+          : []),
+      ],
     },
     include: {
       units: true,

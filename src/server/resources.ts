@@ -26,7 +26,7 @@ import {
 } from "./schemas";
 import { createRepair, repairWhere, getRepair } from "./repairs";
 import { recordPayment, generateRent, addCharge } from "./ledger";
-import { outstanding } from "@/lib/calculations";
+import { outstanding, utcDay } from "@/lib/calculations";
 import { managerIds, notify } from "./notifications";
 export function operationKind(value: string): value is OperationKind {
   return Object.hasOwn(operationSchemas, value);
@@ -52,15 +52,7 @@ export async function listResource(
   const scope = {
     ...base,
     ...linkedPropertyScope(ctx),
-    ...(propertyId ? { propertyId } : {}),
-    ...(ctx.role === "STAFF" && ctx.propertyIds.length
-      ? {
-          propertyId: {
-            in: ctx.propertyIds,
-            ...(propertyId ? { equals: propertyId } : {}),
-          },
-        }
-      : {}),
+    ...(propertyId ? { AND: [{ propertyId }] } : {}),
   };
   const paging = { take, skip: (page - 1) * take };
   const range =
@@ -327,9 +319,11 @@ export async function listResource(
         status:
           outstanding(r.amountPence, r.allocations) === 0
             ? "paid"
-            : r.dueDate < new Date()
+            : r.dueDate < utcDay()
               ? "overdue"
-              : "upcoming",
+              : r.dueDate.getTime() === utcDay().getTime()
+                ? "due"
+                : "upcoming",
       }));
       total = await db.rentObligation.count({ where });
       break;
@@ -358,17 +352,40 @@ export async function listResource(
       if (ctx.role !== "STAKEHOLDER") permit(ctx, "compliance");
       const where = {
         ...scope,
-        ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+        ...(q
+          ? ctx.role === "STAKEHOLDER"
+            ? { category: { contains: q, mode: "insensitive" as const } }
+            : { title: { contains: q, mode: "insensitive" as const } }
+          : {}),
       };
       [rows, total] = await Promise.all([
-        db.complianceRecord.findMany({
-          where,
-          ...paging,
-          orderBy: { expiresAt: "asc" },
-          include: { property: { select: { name: true } } },
-        }),
+        ctx.role === "STAKEHOLDER"
+          ? db.complianceRecord.findMany({
+              where,
+              ...paging,
+              orderBy: { expiresAt: "asc" },
+              select: {
+                id: true,
+                category: true,
+                issuedAt: true,
+                expiresAt: true,
+                status: true,
+                property: { select: { name: true } },
+              },
+            })
+          : db.complianceRecord.findMany({
+              where,
+              ...paging,
+              orderBy: { expiresAt: "asc" },
+              include: { property: { select: { name: true } } },
+            }),
         db.complianceRecord.count({ where }),
       ]);
+      if (ctx.role === "STAKEHOLDER")
+        rows = (rows as { category: string }[]).map((r) => ({
+          ...r,
+          title: r.category,
+        }));
       break;
     }
     case "tasks": {
@@ -441,6 +458,9 @@ export async function listResource(
             contentType: true,
             visibility: true,
             ownerVisible: true,
+            ...(ctx.role === "OWNER" || ctx.role === "STAFF"
+              ? { grants: { select: { tenantId: true } } }
+              : {}),
             createdAt: true,
             property: { select: { name: true } },
           },
@@ -465,11 +485,18 @@ export async function listResource(
           orderBy: { createdAt: "desc" },
           include: {
             tenancy: { select: { reference: true } },
-            messages: { take: 50, orderBy: { createdAt: "asc" } },
+            messages: {
+              take: 50,
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            },
           },
         }),
         db.conversation.count({ where }),
       ]);
+      rows = (rows as { messages: unknown[] }[]).map((r) => ({
+        ...r,
+        messages: r.messages.reverse(),
+      }));
       break;
     }
     case "deposits": {
@@ -575,6 +602,7 @@ export async function listResource(
       const where = {
         ...scope,
         kind: resource,
+        ...(resource === "passport" ? { userId: ctx.userId } : {}),
         ...(ctx.role === "TENANT"
           ? resource === "passport" || resource === "feedback"
             ? { userId: ctx.userId }
@@ -639,8 +667,8 @@ export async function createResource(
         return created;
       });
       await audit(ctx, "property.created", "property", p.id);
-      await db.organisation.update({
-        where: { id: ctx.organisationId },
+      await db.organisation.updateMany({
+        where: { id: ctx.organisationId, onboardingStep: { lt: 2 } },
         data: { onboardingStep: 2 },
       });
       return { id: p.id };
@@ -702,6 +730,16 @@ export async function createResource(
         );
       const t = await db.$transaction(
         async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${x.propertyId} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+          invariant(
+            !(
+              await tx.property.findUniqueOrThrow({
+                where: { id: x.propertyId },
+              })
+            ).archivedAt,
+            409,
+            "Archived properties cannot receive new tenancies.",
+          );
           const overlap = await tx.tenancy.findFirst({
             where: {
               organisationId: ctx.organisationId,
@@ -720,6 +758,7 @@ export async function createResource(
           return tx.tenancy.create({
             data: {
               ...x,
+              initialRentPence: x.rentPence,
               startDate: new Date(x.startDate),
               endDate: x.endDate ? new Date(x.endDate) : undefined,
               organisationId: ctx.organisationId,
@@ -749,8 +788,8 @@ export async function createResource(
       );
       await generateRent(ctx.organisationId, t.id);
       await audit(ctx, "tenancy.created", "tenancy", t.id);
-      await db.organisation.update({
-        where: { id: ctx.organisationId },
+      await db.organisation.updateMany({
+        where: { id: ctx.organisationId, onboardingStep: { lt: 3 } },
         data: { onboardingStep: 3 },
       });
       return { id: t.id };
@@ -1085,20 +1124,23 @@ export async function updateResource(
     await checkProperty(ctx, id);
     await entitlement(ctx, "core");
     if (x.archive === true) {
-      invariant(
-        !(await db.tenancy.count({
-          where: {
-            organisationId: ctx.organisationId,
-            propertyId: id,
-            status: "active",
-          },
-        })),
-        409,
-        "End active tenancies before archiving.",
-      );
-      await db.property.update({
-        where: { id },
-        data: { archivedAt: new Date() },
+      await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${id} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+        invariant(
+          !(await tx.tenancy.count({
+            where: {
+              organisationId: ctx.organisationId,
+              propertyId: id,
+              status: { in: ["active", "periodic", "ending"] },
+            },
+          })),
+          409,
+          "End active tenancies before archiving.",
+        );
+        await tx.property.update({
+          where: { id },
+          data: { archivedAt: new Date() },
+        });
       });
     } else {
       const data = propertySchema.partial().parse(raw);
@@ -1147,21 +1189,64 @@ export async function updateResource(
         422,
         "Rent changes cannot rewrite historical obligations.",
       );
-      await db.rentChange.create({
-        data: {
-          organisationId: ctx.organisationId,
-          tenancyId: id,
-          rentPence: change.rentPence,
-          effectiveFrom: new Date(change.effectiveFrom),
-          reason: change.reason,
-          actorUserId: ctx.userId,
+      await db.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "Tenancy" WHERE id=${id} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+          const changes = await tx.rentChange.findMany({
+            where: { tenancyId: id },
+            orderBy: { effectiveFrom: "asc" },
+          });
+          const effectiveFrom = new Date(change.effectiveFrom);
+          const proposed = [
+            ...changes,
+            { effectiveFrom, rentPence: change.rentPence },
+          ].sort(
+            (a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime(),
+          );
+          const allocated = await tx.rentObligation.findMany({
+            where: {
+              tenancyId: id,
+              scheduleKey: { startsWith: "rent:" },
+              dueDate: { gte: effectiveFrom },
+              allocations: { some: {} },
+            },
+          });
+          invariant(
+            !allocated.some(
+              (o) =>
+                proposed.find((c) => c.effectiveFrom <= o.dueDate)
+                  ?.rentPence !== o.amountPence,
+            ),
+            409,
+            "A rent change would alter an allocated obligation. Review the payment allocations first.",
+          );
+          await tx.rentChange.create({
+            data: {
+              organisationId: ctx.organisationId,
+              tenancyId: id,
+              rentPence: change.rentPence,
+              effectiveFrom,
+              reason: change.reason,
+              actorUserId: ctx.userId,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              organisationId: ctx.organisationId,
+              actorUserId: ctx.userId,
+              action: "tenancy.rent.changed",
+              resourceType: "tenancy",
+              resourceId: id,
+              metadata: {
+                effectiveFrom: change.effectiveFrom,
+                amountPence: change.rentPence,
+              },
+            },
+          });
+          await generateRent(ctx.organisationId, id, new Date(), tx);
         },
-      });
-      await audit(ctx, "tenancy.rent.changed", "tenancy", id, {
-        effectiveFrom: change.effectiveFrom,
-        amountPence: change.rentPence,
-      });
-      await generateRent(ctx.organisationId, id);
+        { isolationLevel: "Serializable" },
+      );
       return { id };
     }
     const input = z
@@ -1170,37 +1255,123 @@ export async function updateResource(
         endDate: z.iso.date().optional(),
       })
       .parse(raw);
-    await db.$transaction(async (tx) => {
-      await tx.tenancy.update({
-        where: { id },
-        data: {
-          ...input,
-          endDate: input.endDate ? new Date(input.endDate) : undefined,
-        },
-      });
-      if (input.status === "ending") {
-        for (const title of [
-          "Final inspection",
-          "Meter readings and keys",
-          "Outstanding rent review",
-          "Deposit review and return",
-          "Prepare for reletting",
-        ])
-          await tx.task.upsert({
-            where: { dedupeKey: `move-out:${id}:${title}` },
-            create: {
+    await db.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${t.propertyId} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM "Tenancy" WHERE id=${id} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+        if (input.status !== "ended") {
+          invariant(
+            !(
+              await tx.property.findUniqueOrThrow({
+                where: { id: t.propertyId },
+              })
+            ).archivedAt,
+            409,
+            "Archived properties cannot be occupied.",
+          );
+          const overlap = await tx.tenancy.findFirst({
+            where: {
+              id: { not: id },
               organisationId: ctx.organisationId,
               propertyId: t.propertyId,
-              tenancyId: id,
-              title,
-              category: "move-out",
-              dueDate: input.endDate ? new Date(input.endDate) : new Date(),
-              dedupeKey: `move-out:${id}:${title}`,
+              status: { in: ["active", "periodic", "ending"] },
+              ...(t.unitId
+                ? { OR: [{ unitId: t.unitId }, { unitId: null }] }
+                : {}),
             },
-            update: {},
           });
-      }
-    });
+          invariant(
+            !overlap,
+            409,
+            "Another active tenancy occupies this property or room.",
+          );
+        }
+        const endDate =
+          input.status === "periodic"
+            ? null
+            : input.endDate
+              ? new Date(input.endDate)
+              : input.status === "ended"
+                ? utcDay()
+                : t.endDate;
+        invariant(
+          !endDate || endDate >= t.startDate,
+          422,
+          "End date cannot precede the tenancy start date.",
+        );
+        invariant(
+          input.status !== "ended" || (endDate && endDate <= utcDay()),
+          422,
+          "Use ending status for a future move-out date.",
+        );
+        if (endDate && ["ending", "ended"].includes(input.status)) {
+          const cutoff = new Date(
+            Math.max(endDate.getTime(), utcDay().getTime()),
+          );
+          const future = {
+            tenancyId: id,
+            organisationId: ctx.organisationId,
+            scheduleKey: { startsWith: "rent:" },
+            dueDate: { gt: cutoff },
+          };
+          invariant(
+            !(await tx.rentObligation.count({
+              where: { ...future, allocations: { some: {} } },
+            })),
+            409,
+            "Rent after the proposed end date has allocated payments. Review those allocations before ending the tenancy.",
+          );
+          const removed = await tx.rentObligation.deleteMany({
+            where: { ...future, allocations: { none: {} } },
+          });
+          if (removed.count)
+            await tx.auditLog.create({
+              data: {
+                organisationId: ctx.organisationId,
+                actorUserId: ctx.userId,
+                action: "rent.future.schedule.cancelled",
+                resourceType: "tenancy",
+                resourceId: id,
+                metadata: {
+                  count: removed.count,
+                  afterDate: cutoff.toISOString().slice(0, 10),
+                },
+              },
+            });
+        }
+        await tx.tenancy.update({
+          where: { id },
+          data: {
+            ...input,
+            endDate,
+          },
+        });
+        if (input.status === "ending") {
+          for (const title of [
+            "Final inspection",
+            "Meter readings and keys",
+            "Outstanding rent review",
+            "Deposit review and return",
+            "Prepare for reletting",
+          ])
+            await tx.task.upsert({
+              where: { dedupeKey: `move-out:${id}:${title}` },
+              create: {
+                organisationId: ctx.organisationId,
+                propertyId: t.propertyId,
+                tenancyId: id,
+                title,
+                category: "move-out",
+                dueDate: input.endDate ? new Date(input.endDate) : new Date(),
+                dedupeKey: `move-out:${id}:${title}`,
+              },
+              update: {},
+            });
+        }
+        await generateRent(ctx.organisationId, id, new Date(), tx);
+      },
+      { isolationLevel: "Serializable" },
+    );
     await audit(ctx, "tenancy.status.changed", "tenancy", id, {
       status: input.status,
     });
@@ -1428,7 +1599,10 @@ export async function updateResource(
         status: data.status,
         referencingStatus: data.referencingStatus,
         details: data.viewingDate
-          ? { viewingDate: data.viewingDate }
+          ? {
+              ...(a.details as Record<string, string>),
+              viewingDate: data.viewingDate,
+            }
           : undefined,
       },
     });
@@ -1491,6 +1665,7 @@ export async function updateResource(
       id,
       organisationId: ctx.organisationId,
       kind: resource,
+      ...(resource === "passport" ? { userId: ctx.userId } : {}),
       ...linkedPropertyScope(ctx),
       ...(ctx.role === "TENANT" ? { userId: ctx.userId } : {}),
     },
@@ -1528,7 +1703,7 @@ export async function updateResource(
     resource === "feedback" &&
     "response" in data
   )
-    data.response = "";
+    data.response = operationSchemas.feedback.parse(r.data).response;
   await db.operationRecord.update({
     where: { id },
     data: { status: input.status, data },

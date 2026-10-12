@@ -101,34 +101,83 @@ export async function uploadDocument(ctx: Context, form: FormData) {
       await checkTenancy(ctx, input.tenancyId, "documents", true);
     if (input.repairId) {
       const r = await getRepair(ctx, input.repairId);
-      input.propertyId = r.property.id;
+      invariant(
+        !input.propertyId || input.propertyId === r.property.id,
+        422,
+        "Document links must belong to the same property.",
+      );
     }
   }
+  // Keep all links coherent; independently authorised records may belong to
+  // different properties and must not be combined into one document.
+  const tenancy = input.tenancyId
+    ? await db.tenancy.findUniqueOrThrow({
+        where: { id: input.tenancyId },
+        select: { propertyId: true },
+      })
+    : null;
+  const repair = input.repairId
+    ? await db.repair.findUniqueOrThrow({
+        where: { id: input.repairId },
+        select: { propertyId: true, tenancyId: true },
+      })
+    : null;
+  invariant(
+    !tenancy || !repair || tenancy.propertyId === repair.propertyId,
+    422,
+    "Repair and tenancy must belong to the same property.",
+  );
+  invariant(
+    !input.tenancyId ||
+      !repair?.tenancyId ||
+      input.tenancyId === repair.tenancyId,
+    422,
+    "Repair and document tenancy must match.",
+  );
+  const linkedPropertyId = repair?.propertyId || tenancy?.propertyId;
+  invariant(
+    !input.propertyId ||
+      !linkedPropertyId ||
+      input.propertyId === linkedPropertyId,
+    422,
+    "Document links must belong to the same property.",
+  );
+  input.propertyId = linkedPropertyId || input.propertyId;
   await checkLimit(ctx, "storage", file.size);
   const candidates = await db.tenant.findMany({
     where: {
       organisationId: ctx.organisationId,
       id: { in: input.tenantIds },
-      ...(input.propertyId
-        ? {
-            participants: {
-              some: { tenancy: { propertyId: input.propertyId } },
-            },
-          }
-        : {}),
-      ...(input.tenancyId
-        ? { participants: { some: { tenancyId: input.tenancyId } } }
-        : {}),
-      ...(ctx.role === "STAFF" && ctx.propertyIds.length
-        ? {
-            participants: {
-              some: { tenancy: { propertyId: { in: ctx.propertyIds } } },
-            },
-          }
+      AND: [
+        ...(input.propertyId
+          ? [
+              {
+                participants: {
+                  some: { tenancy: { propertyId: input.propertyId } },
+                },
+              },
+            ]
+          : []),
+        ...(input.tenancyId
+          ? [{ participants: { some: { tenancyId: input.tenancyId } } }]
+          : []),
+        ...(ctx.role === "STAFF" && ctx.propertyIds.length
+          ? [
+              {
+                participants: {
+                  some: { tenancy: { propertyId: { in: ctx.propertyIds } } },
+                },
+              },
+            ]
+          : []),
+      ],
+      ...(input.repairId
+        ? await repairRecipientScope(ctx, input.repairId)
         : {}),
     },
     select: { id: true, userId: true },
   });
+  if (ctx.role === "TENANT") input.tenantIds = candidates.map((t) => t.id);
   invariant(
     candidates.length === new Set(input.tenantIds).size,
     422,
@@ -277,6 +326,7 @@ export async function shareDocument(ctx: Context, id: string, raw: unknown) {
       organisationId: ctx.organisationId,
       ...linkedPropertyScope(ctx),
     },
+    include: { grants: { select: { tenantId: true } } },
   });
   invariant(d, 404, "Document not found.");
   const x = z
@@ -289,12 +339,21 @@ export async function shareDocument(ctx: Context, id: string, raw: unknown) {
     where: {
       id: { in: x.tenantIds },
       organisationId: ctx.organisationId,
-      ...(d.propertyId
-        ? { participants: { some: { tenancy: { propertyId: d.propertyId } } } }
-        : {}),
-      ...(d.tenancyId
-        ? { participants: { some: { tenancyId: d.tenancyId } } }
-        : {}),
+      AND: [
+        ...(d.propertyId
+          ? [
+              {
+                participants: {
+                  some: { tenancy: { propertyId: d.propertyId } },
+                },
+              },
+            ]
+          : []),
+        ...(d.tenancyId
+          ? [{ participants: { some: { tenancyId: d.tenancyId } } }]
+          : []),
+      ],
+      ...(d.repairId ? await repairRecipientScope(ctx, d.repairId) : {}),
     },
     select: { id: true, userId: true },
   });
@@ -323,6 +382,51 @@ export async function shareDocument(ctx: Context, id: string, raw: unknown) {
         metadata: { tenantIds: x.tenantIds },
       },
     });
+    const revoked = await tx.tenant.findMany({
+      where: {
+        id: {
+          in: d.grants
+            .filter((g) => !x.tenantIds.includes(g.tenantId))
+            .map((g) => g.tenantId),
+        },
+      },
+      select: { userId: true },
+    });
+    await tx.notification.deleteMany({
+      where: {
+        organisationId: ctx.organisationId,
+        resourceType: "document",
+        resourceId: id,
+        userId: { in: revoked.flatMap((t) => (t.userId ? [t.userId] : [])) },
+      },
+    });
+    const newUsers = tenants
+      .filter((t) => !d.grants.some((g) => g.tenantId === t.id))
+      .flatMap((t) => (t.userId ? [t.userId] : []));
+    await notify(
+      ctx.organisationId,
+      newUsers,
+      "Document shared",
+      "/app/documents",
+      `document-shared:${id}:${randomUUID()}`,
+      "document",
+      id,
+      tx,
+    );
   });
   return { id };
+}
+async function repairRecipientScope(ctx: Context, repairId: string) {
+  const repair = await db.repair.findFirstOrThrow({
+    where: { id: repairId, organisationId: ctx.organisationId },
+    select: {
+      reportedByTenantId: true,
+      grants: { select: { tenantId: true } },
+    },
+  });
+  const ids = [
+    ...repair.grants.map((g) => g.tenantId),
+    ...(repair.reportedByTenantId ? [repair.reportedByTenantId] : []),
+  ];
+  return { OR: ids.map((id) => ({ id })) };
 }

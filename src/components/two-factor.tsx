@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
@@ -14,7 +15,7 @@ export function TwoFactorSetup() {
       title="Two-factor authentication"
       subtitle="Required for platform administrators in production."
     >
-      <form
+      <ClientForm
         className="record-form"
         action={async (f) => {
           const r = await authClient.twoFactor.enable({
@@ -37,7 +38,7 @@ export function TwoFactorSetup() {
           />
         </label>
         <button className="button secondary">Set up authenticator</button>
-      </form>
+      </ClientForm>
       {setup && (
         <div className="record-form">
           <p>
@@ -50,7 +51,7 @@ export function TwoFactorSetup() {
               <code key={code}>{code}</code>
             ))}
           </div>
-          <form
+          <ClientForm
             action={async (f) => {
               const r = await authClient.twoFactor.verifyTotp({
                 code: String(f.get("code")),
@@ -72,7 +73,7 @@ export function TwoFactorSetup() {
               required
             />
             <button className="button primary">Verify and enable</button>
-          </form>
+          </ClientForm>
         </div>
       )}
       {message && (
@@ -91,7 +92,7 @@ export function TwoFactorChallenge() {
       <div className="onboarding-card">
         <h1>Verify your sign-in.</h1>
         <p>Enter a code from your authenticator.</p>
-        <form
+        <ClientForm
           className="inline-form"
           action={async (f) => {
             const r = await authClient.twoFactor.verifyTotp({
@@ -111,7 +112,7 @@ export function TwoFactorChallenge() {
             required
           />
           <button className="button primary">Verify</button>
-        </form>
+        </ClientForm>
         {error && (
           <p className="error-message" role="alert">
             {error}

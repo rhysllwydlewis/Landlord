@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -40,8 +41,10 @@ export function RepairDetail({
     try {
       await requestJson(`/api/repairs/${r.id}${path}`, method, data);
       router.refresh();
+      return true;
     } catch (e) {
       setError((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -170,9 +173,9 @@ export function RepairDetail({
                 </div>
               ))}
               {(editable || (tenant && !!r.tenantComments)) && (
-                <form
+                <ClientForm
                   action={async (f) => {
-                    await act("/comments", {
+                    return act("/comments", {
                       body: f.get("body"),
                       public: tenant || f.get("public") === "on",
                     });
@@ -202,7 +205,7 @@ export function RepairDetail({
                       Send message
                     </button>
                   </div>
-                </form>
+                </ClientForm>
               )}
             </div>
           </Panel>
@@ -221,7 +224,7 @@ export function RepairDetail({
         <div>
           {editable && (
             <Panel title="Manage repair">
-              <form
+              <ClientForm
                 className="record-form"
                 action={async (f) => {
                   await act(
@@ -291,7 +294,7 @@ export function RepairDetail({
                 <button className="button primary full" disabled={busy}>
                   Save changes
                 </button>
-              </form>
+              </ClientForm>
             </Panel>
           )}
           {editable && (
@@ -299,7 +302,7 @@ export function RepairDetail({
               title="Tenant visibility"
               subtitle="Private by default. You decide who sees it."
             >
-              <form
+              <ClientForm
                 className="record-form"
                 action={async (f) => {
                   await act("/visibility", {
@@ -343,7 +346,7 @@ export function RepairDetail({
                   <Users size={15} />
                   Save tenant access
                 </button>
-              </form>
+              </ClientForm>
             </Panel>
           )}
           {!tenant && "expenses" in r && (

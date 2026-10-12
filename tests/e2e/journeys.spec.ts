@@ -169,16 +169,14 @@ test("tenant repair report, public conversation and landlord resolution", async 
   await tenant.page
     .getByRole("combobox", { name: "Category", exact: true })
     .selectOption("Plumbing");
-  await tenant.page
-    .locator("input[name=attachments]")
-    .setInputFiles({
-      name: "repair-photo.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ9kAAAAASUVORK5CYII=",
-        "base64",
-      ),
-    });
+  await tenant.page.locator("input[name=attachments]").setInputFiles({
+    name: "repair-photo.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ9kAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   await tenant.page.getByRole("button", { name: "Submit repair" }).click();
   await tenant.page.waitForURL(/\/app\/repairs\/.+/);
   const id = tenant.page.url().split("/").pop()!;
@@ -359,4 +357,247 @@ test("tenant mobile navigation works and forbids landlord records", async ({
 });
 test.afterAll(async () => {
   await db.$disconnect();
+});
+
+test("scoped staff cannot open or edit a different requested property", async ({
+  browser,
+}) => {
+  const landlord = await actor(browser, "Landlord");
+  const member = await db.membership.findFirstOrThrow({
+    where: { organisationId: seed.records.organisationId, role: "OWNER" },
+  });
+  const allowed = await db.property.findFirstOrThrow({
+    where: { organisationId: member.organisationId, archivedAt: null },
+  });
+  const denied = await db.property.findFirstOrThrow({
+    where: {
+      organisationId: member.organisationId,
+      id: { not: allowed.id },
+      archivedAt: null,
+    },
+  });
+  const outsiderOrg = await db.organisation.create({
+    data: { name: "Review boundary fixture" },
+  });
+  const outsider = await db.property.create({
+    data: {
+      organisationId: outsiderOrg.id,
+      name: "Outside property",
+      address: "1 Boundary Road",
+      postcode: "BS1 1AA",
+    },
+  });
+  try {
+    await db.membership.update({
+      where: { id: member.id },
+      data: {
+        role: "STAFF",
+        permissions: ["properties:write"],
+        propertyIds: [allowed.id],
+      },
+    });
+    await landlord.page.goto(`/app/properties/${denied.id}`);
+    await expect(
+      landlord.page.getByRole("heading", {
+        name: "That record isn’t available.",
+      }),
+    ).toBeVisible();
+    await expect(
+      landlord.page.getByText(allowed.address, { exact: true }),
+    ).toHaveCount(0);
+    const result = await landlord.page.request.patch(
+      `/api/workspace/properties/${outsider.id}`,
+      {
+        headers: { origin: "http://localhost:3000" },
+        data: { name: "Unauthorised change" },
+      },
+    );
+    expect(result.status()).toBe(404);
+    expect(
+      (await db.property.findUniqueOrThrow({ where: { id: outsider.id } }))
+        .name,
+    ).toBe("Outside property");
+  } finally {
+    await db.membership.update({
+      where: { id: member.id },
+      data: {
+        role: member.role,
+        permissions: member.permissions,
+        propertyIds: member.propertyIds,
+      },
+    });
+    await db.organisation.delete({ where: { id: outsiderOrg.id } });
+    await landlord.context.close();
+  }
+});
+
+test("document sharing preserves selections and prevents tenancy ID guessing", async ({
+  browser,
+}) => {
+  const landlord = await actor(browser, "Landlord");
+  const tenant = await actor(browser, "Tenant");
+  const other = seed.accounts.find((a) => a.role === "OtherTenant")!;
+  const target = await db.tenant.findFirstOrThrow({
+    where: {
+      organisationId: seed.records.organisationId,
+      email: seed.accounts.find((a) => a.role === "Tenant")!.email,
+    },
+    include: { participants: { include: { tenancy: true } } },
+  });
+  const otherRecord = await db.tenant.findFirstOrThrow({
+    where: { organisationId: seed.records.organisationId, email: other.email },
+    include: { participants: true },
+  });
+  const fileName = `Review sharing ${randomUUID().slice(0, 8)}.pdf`;
+  const upload = await landlord.page.request.post("/api/documents", {
+    headers: { origin: "http://localhost:3000" },
+    multipart: {
+      file: {
+        name: fileName,
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-review"),
+      },
+      tenancyId: target.participants[0].tenancyId,
+    },
+  });
+  expect(upload.ok()).toBe(true);
+  const file = await upload.json();
+  expect(
+    (
+      await landlord.page.request.patch(`/api/documents/${file.id}`, {
+        headers: { origin: "http://localhost:3000" },
+        data: { tenantIds: [target.id] },
+      })
+    ).ok(),
+  ).toBe(true);
+  await landlord.page.goto(`/app/documents?q=${encodeURIComponent(fileName)}`);
+  await landlord.page
+    .getByRole("button", { name: "Change document sharing" })
+    .click();
+  const checkbox = landlord.page.getByRole("checkbox", {
+    name: target.name,
+    exact: true,
+  });
+  await expect(checkbox).toBeChecked();
+  await landlord.page.getByRole("button", { name: "Save access" }).click();
+  expect(
+    (await tenant.page.request.get(`/api/documents/${file.id}`)).status(),
+  ).toBe(200);
+  const deniedUpload = await tenant.page.request.post("/api/documents", {
+    headers: { origin: "http://localhost:3000" },
+    multipart: {
+      file: {
+        name: "Guess.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-review"),
+      },
+      tenancyId: otherRecord.participants[0].tenancyId,
+    },
+  });
+  expect(deniedUpload.status()).toBe(404);
+  await landlord.context.close();
+  await tenant.context.close();
+});
+
+test("invalid deposit edits keep the form open and email preferences survive reload", async ({
+  browser,
+}) => {
+  const landlord = await actor(browser, "Landlord");
+  await landlord.page.goto("/app/deposits");
+  await landlord.page
+    .getByRole("button", { name: "Edit deposit" })
+    .first()
+    .click();
+  await landlord.page.getByLabel("Amount returned (£)").fill("999999");
+  await landlord.page
+    .getByRole("button", { name: "Save deposit record" })
+    .click();
+  await expect(
+    landlord.page
+      .getByRole("alert")
+      .filter({ hasText: "exceed the deposit" })
+      .last(),
+  ).toBeVisible();
+  await expect(landlord.page.getByLabel("Amount returned (£)")).toHaveValue(
+    "999999",
+  );
+  await landlord.page.goto("/app/settings");
+  const preference = landlord.page.getByRole("checkbox", {
+    name: "Email me about routine portal updates",
+  });
+  const original = await preference.isChecked();
+  await preference.setChecked(false);
+  await landlord.page.getByRole("button", { name: "Save preferences" }).click();
+  await expect(
+    landlord.page
+      .getByRole("status", { exact: true })
+      .filter({ hasText: "Preferences saved" }),
+  ).toBeVisible();
+  await landlord.page.reload();
+  await expect(preference).not.toBeChecked();
+  await landlord.page.request.patch("/api/settings", {
+    headers: { origin: "http://localhost:3000" },
+    data: { notificationPreferences: { email: original } },
+  });
+  await landlord.context.close();
+});
+
+test("tenancy conversations retain access to older messages", async ({
+  browser,
+}) => {
+  const landlord = await actor(browser, "Landlord");
+  const tenant = await actor(browser, "Tenant");
+  const person = await db.tenant.findFirstOrThrow({
+    where: {
+      organisationId: seed.records.organisationId,
+      email: seed.accounts.find((a) => a.role === "Tenant")!.email,
+    },
+    include: { participants: true },
+  });
+  const subject = `History review ${randomUUID().slice(0, 8)}`;
+  const created = await landlord.page.request.post("/api/workspace/messages", {
+    headers: { origin: "http://localhost:3000" },
+    data: {
+      tenancyId: person.participants[0].tenancyId,
+      tenantIds: [person.id],
+      subject,
+      body: "Original history message",
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const conversation = await created.json();
+  const first = await db.message.findFirstOrThrow({
+    where: { conversationId: conversation.id },
+  });
+  await db.message.createMany({
+    data: Array.from({ length: 55 }, (_, i) => ({
+      organisationId: seed.records.organisationId,
+      conversationId: conversation.id,
+      senderUserId: first.senderUserId,
+      senderName: "Review landlord",
+      body: `History reply ${i}`,
+      createdAt: new Date(first.createdAt.getTime() + (i + 1) * 1000),
+    })),
+  });
+  await tenant.page.goto("/app/messages");
+  const thread = tenant.page
+    .locator("section.thread")
+    .filter({
+      has: tenant.page.getByRole("heading", { name: subject, exact: true }),
+    });
+  await expect(
+    thread.getByText("History reply 54", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    thread.getByText("Original history message", { exact: true }),
+  ).toHaveCount(0);
+  await thread.getByRole("button", { name: "Load earlier messages" }).click();
+  await expect(
+    thread.getByText("Original history message", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    thread.getByRole("button", { name: "Load earlier messages" }),
+  ).toHaveCount(0);
+  await landlord.context.close();
+  await tenant.context.close();
 });

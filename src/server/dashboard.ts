@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { linkedPropertyScope, propertyScope, type Context } from "./context";
 import { repairWhere } from "./repairs";
-import { outstanding, anomalies } from "@/lib/calculations";
+import { outstanding, anomalies, utcDay } from "@/lib/calculations";
 export function can(ctx: Context, p: string) {
   return (
     ctx.role === "OWNER" ||
@@ -176,7 +176,8 @@ export async function dashboard(ctx: Context) {
   );
   const occupied = new Set(active.map((t) => t.propertyId)).size;
   const overdue = obligations.filter(
-    (o) => o.dueDate < now && outstanding(o.amountPence, o.allocations) > 0,
+    (o) =>
+      o.dueDate < utcDay(now) && outstanding(o.amountPence, o.allocations) > 0,
   );
   const dueMonth = obligations.filter(
     (o) => o.dueDate >= monthStart && o.dueDate < monthEnd,
@@ -236,7 +237,7 @@ export async function dashboard(ctx: Context) {
     compliance: compliance.slice(0, 5),
     tasks: tasks.slice(0, 5),
     activity,
-    nextRent: obligations.find((o) => o.dueDate >= now) || null,
+    nextRent: obligations.find((o) => o.dueDate >= utcDay(now)) || null,
     anomalies: anomalies(expenses),
     payments: payments.slice(0, 5),
   };

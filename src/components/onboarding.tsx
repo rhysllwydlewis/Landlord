@@ -1,4 +1,5 @@
 "use client";
+import { ClientForm } from "./client-form";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -48,7 +49,7 @@ export function Onboarding({
           ))}
         </div>
         {!step ? (
-          <form
+          <ClientForm
             action={async (f) => {
               setBusy(true);
               try {
@@ -102,7 +103,7 @@ export function Onboarding({
               <ArrowRight size={16} />
             </button>
             {error && <p className="error-message">{error}</p>}
-          </form>
+          </ClientForm>
         ) : (
           <div className="onboarding-steps">
             {[

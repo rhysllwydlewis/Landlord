@@ -14,13 +14,20 @@ import {
   commentRepair,
   updateRepair,
 } from "@/server/repairs";
-import { recordPayment, generateRent } from "@/server/ledger";
-import { uploadDocument, downloadDocument } from "@/server/documents";
+import { recordPayment, generateRent, addCharge } from "@/server/ledger";
+import {
+  uploadDocument,
+  downloadDocument,
+  shareDocument,
+} from "@/server/documents";
 import { entitlement } from "@/server/entitlements";
 import { previewImport, commitImport } from "@/server/imports";
 import { schedule } from "@/server/jobs";
 import { financialReport } from "@/server/reports";
 import type { Context } from "@/server/context";
+import { checkProperty, checkTenancy } from "@/server/context";
+import { utcDay } from "@/lib/calculations";
+import { earlierMessages } from "@/server/messages";
 let owner: Context,
   tenant: Context,
   otherTenant: Context,
@@ -210,6 +217,49 @@ afterAll(async () => {
   await db.$disconnect();
 });
 describe("Organisation and role boundaries", () => {
+  it("requires the exact requested property for scoped staff", async () => {
+    const scoped = {
+      ...staff,
+      permissions: ["properties:write"],
+      propertyIds: [propertyId],
+    };
+    expect((await checkProperty(scoped, propertyId)).id).toBe(propertyId);
+    await expect(checkProperty(scoped, otherProperty)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(checkProperty(scoped, "missing")).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(
+      updateResource(scoped, "properties", otherProperty, {
+        name: "Unauthorised edit",
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(
+      (await db.property.findUniqueOrThrow({ where: { id: otherProperty } }))
+        .name,
+    ).toBe("Other property");
+  });
+  it("requires the exact requested tenancy for tenants", async () => {
+    expect((await checkTenancy(tenant, tenancyId, "documents")).id).toBe(
+      tenancyId,
+    );
+    await expect(
+      checkTenancy(tenant, otherTenant.tenancyIds[0], "documents"),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      checkTenancy(tenant, "missing", "documents"),
+    ).rejects.toMatchObject({ status: 404 });
+    const form = new FormData();
+    form.set(
+      "file",
+      new File(["%PDF-test"], "test.pdf", { type: "application/pdf" }),
+    );
+    form.set("tenancyId", otherTenant.tenancyIds[0]);
+    await expect(uploadDocument(tenant, form)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
   it("creates persistent property and tenancy records", async () => {
     expect(
       await db.property.findUnique({ where: { id: propertyId } }),
@@ -677,5 +727,382 @@ describe("Additional integrity and lifecycle checks", () => {
     expect(await db.property.count({ where: { organisationId: org.id } })).toBe(
       1,
     );
+  });
+});
+
+describe("Review regressions", () => {
+  async function freshTenancy() {
+    const p = await createResource(owner, "properties", {
+      name: `Lifecycle ${randomUUID()}`,
+      address: "10 Review Road",
+      postcode: "BS1 1AA",
+      type: "house",
+    });
+    const t = await createResource(owner, "tenancies", {
+      propertyId: p.id,
+      tenantIds: [tenantId],
+      reference: randomUUID(),
+      startDate: past,
+      rentPence: 100000,
+      dueDay: 1,
+      frequency: "monthly",
+    });
+    return { propertyId: p.id, tenancyId: t.id };
+  }
+  it("intersects requested property filters with read-only owner access and returns compliance summaries", async () => {
+    const t = await freshTenancy();
+    await createResource(owner, "compliance", {
+      propertyId: t.propertyId,
+      title: "Restricted review record",
+      category: "Insurance",
+      issuedAt: past,
+      notes: "Private information must not be shared",
+    });
+    const stakeholder = {
+      ...owner,
+      role: "STAKEHOLDER" as const,
+      propertyIds: [propertyId],
+      permissions: [],
+    };
+    expect(
+      (
+        await listResource(
+          stakeholder,
+          "compliance",
+          new URLSearchParams({ propertyId: t.propertyId }),
+        )
+      ).total,
+    ).toBe(0);
+    const allowed = (
+      await listResource(
+        stakeholder,
+        "compliance",
+        new URLSearchParams({ propertyId }),
+      )
+    ).rows as Record<string, unknown>[];
+    expect(allowed.length).toBeGreaterThan(0);
+    expect(allowed[0]).not.toHaveProperty("notes");
+    expect(allowed[0]).not.toHaveProperty("reference");
+    expect(allowed[0]).not.toHaveProperty("documentId");
+  });
+  it("does not mark a charge due today as overdue", async () => {
+    const charge = await addCharge(owner, {
+      tenancyId,
+      amountPence: 1200,
+      dueDate: utcDay().toISOString().slice(0, 10),
+      description: "Due today",
+      idempotencyKey: randomUUID(),
+    });
+    const rows = (await listResource(owner, "rent", new URLSearchParams()))
+      .rows as { id: string; status: string }[];
+    expect(rows.find((r) => r.id === charge.id)?.status).toBe("due");
+  });
+  it("retries a charge without duplication and rejects changed idempotent submissions", async () => {
+    const input = {
+      tenancyId,
+      amountPence: 2000,
+      dueDate: past,
+      description: "Manual agreed charge",
+      idempotencyKey: randomUUID(),
+    };
+    expect(await addCharge(owner, input)).toEqual(
+      await addCharge(owner, input),
+    );
+    await expect(
+      addCharge(owner, { ...input, amountPence: 2100 }),
+    ).rejects.toMatchObject({ status: 409 });
+    const payment = {
+      tenancyId,
+      amountPence: 1000,
+      paidAt: past,
+      reference: "Recorded transfer",
+      idempotencyKey: randomUUID(),
+    };
+    await recordPayment(owner, payment);
+    await expect(
+      recordPayment(owner, { ...payment, reference: "Different transfer" }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it("retains the original rent when historical schedules are regenerated after a rate change", async () => {
+    const t = await freshTenancy();
+    const effective = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    );
+    await updateResource(owner, "tenancies", t.tenancyId, {
+      rentPence: 125000,
+      effectiveFrom: effective.toISOString().slice(0, 10),
+      reason: "Reviewed rent change",
+      requirementsReviewed: true,
+    });
+    await generateRent(owner.organisationId, t.tenancyId, effective);
+    await db.rentObligation.deleteMany({
+      where: { tenancyId: t.tenancyId, dueDate: new Date(past) },
+    });
+    await generateRent(owner.organisationId, t.tenancyId, effective);
+    expect(
+      await db.rentObligation.findFirst({
+        where: { tenancyId: t.tenancyId, dueDate: new Date(past) },
+      }),
+    ).toMatchObject({ amountPence: 100000 });
+    expect(
+      await db.tenancy.findUnique({ where: { id: t.tenancyId } }),
+    ).toMatchObject({ rentPence: 125000, initialRentPence: 100000 });
+  });
+  it("rejects a rate change that would silently leave paid future rent at the old amount", async () => {
+    const t = await freshTenancy();
+    await recordPayment(owner, {
+      tenancyId: t.tenancyId,
+      amountPence: 200000,
+      paidAt: past,
+      reference: "Prepaid rent",
+      idempotencyKey: randomUUID(),
+    });
+    const effective = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+    )
+      .toISOString()
+      .slice(0, 10);
+    await expect(
+      updateResource(owner, "tenancies", t.tenancyId, {
+        rentPence: 130000,
+        effectiveFrom: effective,
+        reason: "Reviewed rent change",
+        requirementsReviewed: true,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(
+      await db.rentChange.count({ where: { tenancyId: t.tenancyId } }),
+    ).toBe(0);
+  });
+  it("continues periodic rent, protects occupied properties and stops future rent at move-out", async () => {
+    const t = await freshTenancy();
+    await db.tenancy.update({
+      where: { id: t.tenancyId },
+      data: { endDate: new Date(past) },
+    });
+    await updateResource(owner, "tenancies", t.tenancyId, {
+      status: "periodic",
+    });
+    expect(
+      await db.tenancy.findUnique({ where: { id: t.tenancyId } }),
+    ).toMatchObject({ status: "periodic", endDate: null });
+    expect(
+      await db.rentObligation.count({
+        where: { tenancyId: t.tenancyId, dueDate: { gt: utcDay() } },
+      }),
+    ).toBeGreaterThan(0);
+    await expect(
+      updateResource(owner, "properties", t.propertyId, { archive: true }),
+    ).rejects.toMatchObject({ status: 409 });
+    await updateResource(owner, "tenancies", t.tenancyId, { status: "ended" });
+    expect(
+      await db.rentObligation.count({
+        where: { tenancyId: t.tenancyId, dueDate: { gt: utcDay() } },
+      }),
+    ).toBe(0);
+    const replacement = await createResource(owner, "tenancies", {
+      propertyId: t.propertyId,
+      tenantIds: [tenantB],
+      reference: randomUUID(),
+      startDate: past,
+      rentPence: 90000,
+    });
+    await expect(
+      updateResource(owner, "tenancies", t.tenancyId, { status: "active" }),
+    ).rejects.toMatchObject({ status: 409 });
+    await updateResource(owner, "tenancies", replacement.id, {
+      status: "ended",
+    });
+    await updateResource(owner, "properties", t.propertyId, { archive: true });
+    await expect(
+      createResource(owner, "tenancies", {
+        propertyId: t.propertyId,
+        tenantIds: [tenantId],
+        reference: randomUUID(),
+        startDate: past,
+        rentPence: 90000,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it("keeps completed onboarding from regressing when more records are created", async () => {
+    await db.organisation.update({
+      where: { id: owner.organisationId },
+      data: { onboardingStep: 4 },
+    });
+    await freshTenancy();
+    expect(
+      await db.organisation.findUnique({ where: { id: owner.organisationId } }),
+    ).toMatchObject({ onboardingStep: 4 });
+  });
+  it("preserves applicant details when scheduling a viewing", async () => {
+    const listing = await createResource(owner, "listings", {
+      propertyId,
+      title: "Review listing",
+      description: "A review listing with a manual application workflow",
+      rentPence: 100000,
+      depositPence: 100000,
+      availableAt: past,
+    });
+    const a = await db.application.create({
+      data: {
+        organisationId: owner.organisationId,
+        listingId: listing.id,
+        name: "Applicant",
+        phone: "",
+        consentAt: new Date(),
+        retentionUntil: new Date(Date.now() + 90 * 86400000),
+        email: `app-${suffix}@example.test`,
+        details: {
+          enquiry: "I would like a viewing",
+          employment: "Self-reported",
+        },
+      },
+    });
+    await updateResource(owner, "applications", a.id, {
+      status: "viewing scheduled",
+      viewingDate: new Date().toISOString(),
+    });
+    expect(
+      (await db.application.findUniqueOrThrow({ where: { id: a.id } })).details,
+    ).toMatchObject({
+      enquiry: "I would like a viewing",
+      employment: "Self-reported",
+    });
+  });
+  it("shows recent replies once a conversation exceeds fifty messages", async () => {
+    const c = await createResource(tenant, "messages", {
+      tenancyId,
+      subject: "Review thread",
+      body: "Initial message",
+      tenantIds: [],
+    });
+    const initialMessage = await db.message.findFirstOrThrow({
+      where: { conversationId: c.id },
+    });
+    await db.message.createMany({
+      data: Array.from({ length: 55 }, (_, i) => ({
+        organisationId: owner.organisationId,
+        conversationId: c.id,
+        senderUserId: owner.userId,
+        senderName: "Landlord",
+        body: `Reply ${i}`,
+        createdAt: new Date(
+          initialMessage.createdAt.getTime() + (i + 1) * 1000,
+        ),
+      })),
+    });
+    const row = (await listResource(tenant, "messages", new URLSearchParams()))
+      .rows as { id: string; messages: { body: string }[] }[];
+    const messages = row.find((r) => r.id === c.id)!.messages;
+    expect(messages).toHaveLength(50);
+    expect(messages.at(-1)?.body).toBe("Reply 54");
+    const recent = await earlierMessages(tenant, c.id);
+    const earlier = await earlierMessages(tenant, c.id, recent.messages[0].id);
+    expect(earlier.messages[0].body).toBe("Initial message");
+    expect(earlier.hasMore).toBe(false);
+    await expect(earlierMessages(otherTenant, c.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(earlierMessages(otherOwner, c.id)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+  it("protects portable profiles and retains landlord responses when tenants edit feedback", async () => {
+    const profile = await createResource(tenant, "passport", {
+      title: "Private history",
+      data: {
+        source: "self-reported",
+        description: "Private self-reported rental history",
+        shared: false,
+        consent: false,
+      },
+    });
+    expect(
+      (await listResource(owner, "passport", new URLSearchParams())).rows,
+    ).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: profile.id })]),
+    );
+    await expect(
+      updateResource(owner, "passport", profile.id, { status: "closed" }),
+    ).rejects.toMatchObject({ status: 404 });
+    const feedback = await createResource(tenant, "feedback", {
+      title: "Feedback",
+      propertyId,
+      tenancyId,
+      data: { type: "general", body: "Please review this message" },
+    });
+    await updateResource(owner, "feedback", feedback.id, {
+      data: {
+        type: "general",
+        body: "Please review this message",
+        response: "We have responded",
+      },
+    });
+    await updateResource(tenant, "feedback", feedback.id, {
+      data: {
+        type: "general",
+        body: "Updated tenant message",
+        response: "Attempt to overwrite",
+      },
+    });
+    expect(
+      (
+        await db.operationRecord.findUniqueOrThrow({
+          where: { id: feedback.id },
+        })
+      ).data,
+    ).toMatchObject({ response: "We have responded" });
+  });
+  it("rejects mismatched document links and respects private repair attachment recipients", async () => {
+    const form = new FormData();
+    form.set(
+      "file",
+      new File(["%PDF-test"], "review.pdf", { type: "application/pdf" }),
+    );
+    form.set("propertyId", propertyId);
+    form.set("tenancyId", otherTenant.tenancyIds[0]);
+    form.set("repairId", tenantRepair);
+    await expect(uploadDocument(owner, form)).rejects.toMatchObject({
+      status: 422,
+    });
+    form.delete("repairId");
+    form.set("tenancyId", tenancyId);
+    const file = await uploadDocument(owner, form);
+    await shareDocument(owner, file.id, { tenantIds: [tenantId] });
+    expect(
+      (await listResource(owner, "documents", new URLSearchParams())).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: file.id, grants: [{ tenantId }] }),
+      ]),
+    );
+    expect(
+      await db.notification.count({
+        where: {
+          resourceType: "document",
+          resourceId: file.id,
+          userId: tenant.userId,
+        },
+      }),
+    ).toBe(1);
+    await shareDocument(owner, file.id, { tenantIds: [] });
+    await expect(downloadDocument(tenant, file.id)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(
+      await db.notification.count({
+        where: {
+          resourceType: "document",
+          resourceId: file.id,
+          userId: tenant.userId,
+        },
+      }),
+    ).toBe(0);
+    form.delete("tenancyId");
+    form.set("repairId", privateRepair);
+    const privateFile = await uploadDocument(owner, form);
+    await expect(
+      shareDocument(owner, privateFile.id, { tenantIds: [tenantId] }),
+    ).rejects.toMatchObject({ status: 422 });
   });
 });

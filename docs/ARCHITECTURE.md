@@ -57,3 +57,11 @@ Stripe Billing never processes tenant rent. Regulated rent collection, signature
 ## Configuration
 
 Branding is in `src/lib/config.ts`; credentials are environment variables. Local storage and sample plans explicitly reject production use. Administrator-reviewed compliance rules include version, jurisdiction, property type, effective dates and source. No legal requirements or precise failure probabilities are fabricated.
+
+## Rent history and tenancy transitions
+
+`Tenancy.initialRentPence` preserves the original scheduled amount while `rentPence` represents the current amount. Versioned rent changes determine each obligation's rate. Schedule generation locks and re-reads each tenancy, uses its supplied clock for future updates, and never silently rewrites allocated obligations. The initial-rent migration backfills from the earliest generated rent obligation where available; imported legacy history should be reviewed before migration if its earliest obligation is not the initial contractual rent.
+
+Due dates are UTC calendar dates; due-today charges are not overdue. Periodic tenancies clear the original term end and keep generating rent. Ending a tenancy cancels only unallocated future scheduled rent, records an audit event, and preserves historical charges and manual charges. Allocated future rent blocks a conflicting rent change or move-out pending manual review; payment reversals and full final-settlement tooling remain documented implementation gaps.
+
+Client API forms use a common submit handler that preserves input after validation/server failures, prevents overlapping submissions, and resets only on an explicit successful result. Conversations initially load the newest 50 messages; earlier history is available through an authorised cursor-based endpoint.
