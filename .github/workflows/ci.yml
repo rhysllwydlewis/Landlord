@@ -1,0 +1,47 @@
+name: Verify platform
+on:
+  pull_request:
+  push:
+    branches: [main, build/property-management-platform]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: ci-only-disposable
+          POSTGRES_DB: platform
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U platform -d platform"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://platform:ci-only-disposable@localhost:5432/platform
+      BETTER_AUTH_URL: http://localhost:3000
+      APP_URL: http://localhost:3000
+      STORAGE_DRIVER: local
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Generate private CI authentication secret
+        run: node -e 'require("fs").appendFileSync(process.env.GITHUB_ENV,"BETTER_AUTH_SECRET="+require("crypto").randomBytes(48).toString("hex")+"\n")'
+      - run: npm run db:generate && npm run db:migrate
+      - run: npm run typecheck && npm run lint && npm test
+      - run: npm run build
+      - name: Create isolated test database and config
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const c=new pg.Client({connectionString:process.env.DATABASE_URL}); await c.connect(); await c.query("CREATE DATABASE platform_test"); await c.end();'
+          node -e 'require("fs").writeFileSync(".env.test","DATABASE_URL=postgresql://platform:ci-only-disposable@localhost:5432/platform_test\n")'
+          DATABASE_URL=postgresql://platform:ci-only-disposable@localhost:5432/platform_test npm run db:migrate
+      - run: npm run test:integration
+      - run: NODE_ENV=development npm run db:seed
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm audit --omit=dev --audit-level=high
