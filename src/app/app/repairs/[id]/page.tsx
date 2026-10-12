@@ -20,6 +20,14 @@ export default async function RepairPage({
       repair={JSON.parse(JSON.stringify(repair))}
       options={await options(ctx)}
       tenant={ctx.role === "TENANT"}
+      financeEditable={
+        ctx.role === "OWNER" ||
+        (ctx.role === "STAFF" && ctx.permissions.includes("finance:write"))
+      }
+      documentEditable={
+        ctx.role === "OWNER" ||
+        (ctx.role === "STAFF" && ctx.permissions.includes("documents:write"))
+      }
       editable={
         ctx.role === "OWNER" ||
         (ctx.role === "STAFF" && ctx.permissions.includes("repairs:write"))

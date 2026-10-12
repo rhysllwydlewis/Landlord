@@ -2,11 +2,15 @@ import { context, csrf } from "@/server/context";
 import { apiError } from "@/server/errors";
 import { downloadDocument, shareDocument } from "@/server/documents";
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    return await downloadDocument(await context(), (await params).id);
+    return await downloadDocument(
+      await context(),
+      (await params).id,
+      new URL(request.url).searchParams.get("preview") === "1",
+    );
   } catch (e) {
     return apiError(e);
   }

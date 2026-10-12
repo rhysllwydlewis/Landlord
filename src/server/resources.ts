@@ -28,6 +28,13 @@ import { createRepair, repairWhere, getRepair } from "./repairs";
 import { recordPayment, generateRent, addCharge } from "./ledger";
 import { outstanding, utcDay } from "@/lib/calculations";
 import { managerIds, notify } from "./notifications";
+import {
+  validatePropertyChanges,
+  updateUnit,
+  unitInput,
+  availableUnitScope,
+} from "./properties";
+import { updateFeedback } from "./feedback";
 export function operationKind(value: string): value is OperationKind {
   return Object.hasOwn(operationSchemas, value);
 }
@@ -97,10 +104,13 @@ export async function listResource(
             bathrooms: true,
             epcRating: true,
             jurisdiction: true,
-            units: { select: { id: true, name: true, type: true } },
+            units: {
+              where: availableUnitScope(ctx),
+              select: { id: true, name: true, type: true },
+            },
             tenancies: {
               where: {
-                status: "active",
+                status: { in: ["active", "periodic", "ending"] },
                 ...(ctx.role === "TENANT"
                   ? { id: { in: ctx.tenancyIds } }
                   : {}),
@@ -457,6 +467,7 @@ export async function listResource(
             category: true,
             size: true,
             contentType: true,
+            expiresAt: true,
             visibility: true,
             ownerVisible: true,
             ...(ctx.role === "OWNER" || ctx.role === "STAFF"
@@ -504,8 +515,21 @@ export async function listResource(
       if (ctx.role !== "TENANT") permit(ctx, "tenancies");
       const where = {
         ...base,
+        ...(q
+          ? {
+              OR: [
+                { reference: { contains: q, mode: "insensitive" as const } },
+                {
+                  tenancy: {
+                    reference: { contains: q, mode: "insensitive" as const },
+                  },
+                },
+              ],
+            }
+          : {}),
         tenancy: {
           ...linkedPropertyScope(ctx),
+          ...(propertyId ? { AND: [{ propertyId }] } : {}),
           ...(ctx.role === "TENANT" ? { id: { in: ctx.tenancyIds } } : {}),
         },
       };
@@ -633,22 +657,7 @@ export async function createResource(
     case "properties": {
       permit(ctx, "properties", true);
       const x = propertySchema.parse(raw);
-      if (x.portfolioId)
-        invariant(
-          await db.portfolio.findFirst({
-            where: { id: x.portfolioId, organisationId: ctx.organisationId },
-          }),
-          422,
-          "Invalid portfolio.",
-        );
-      if (x.ownerId)
-        invariant(
-          await db.ownershipEntity.findFirst({
-            where: { id: x.ownerId, organisationId: ctx.organisationId },
-          }),
-          422,
-          "Invalid owner.",
-        );
+      await validatePropertyChanges(ctx, x);
       const p = await db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "Organisation" WHERE id=${ctx.organisationId} FOR UPDATE`;
         await checkLimit(ctx, "property", 1, tx);
@@ -675,20 +684,25 @@ export async function createResource(
       return { id: p.id };
     }
     case "units": {
-      const x = z
-        .object({
-          propertyId: z.string(),
-          name: z.string().trim().min(1).max(100),
-          type: z.enum(["room", "flat", "unit"]).default("room"),
-        })
-        .parse(raw);
+      const x = unitInput.parse(raw);
       await checkProperty(ctx, x.propertyId);
       const u = await db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "Organisation" WHERE id=${ctx.organisationId} FOR UPDATE`;
         await checkLimit(ctx, "unit", 1, tx);
+        await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${x.propertyId} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+        invariant(
+          !(
+            await tx.property.findUniqueOrThrow({ where: { id: x.propertyId } })
+          ).archivedAt,
+          409,
+          "Archived properties cannot receive new rooms.",
+        );
         return tx.unit.create({
           data: { ...x, organisationId: ctx.organisationId },
         });
+      });
+      await audit(ctx, "unit.created", "property", x.propertyId, {
+        unitId: u.id,
       });
       return { id: u.id };
     }
@@ -741,6 +755,19 @@ export async function createResource(
             409,
             "Archived properties cannot receive new tenancies.",
           );
+          if (x.unitId)
+            invariant(
+              await tx.unit.findFirst({
+                where: {
+                  id: x.unitId,
+                  propertyId: x.propertyId,
+                  organisationId: ctx.organisationId,
+                  archivedAt: null,
+                },
+              }),
+              422,
+              "Choose an active room belonging to this property.",
+            );
           const overlap = await tx.tenancy.findFirst({
             where: {
               organisationId: ctx.organisationId,
@@ -1060,7 +1087,10 @@ export async function createResource(
             403,
             "Verified records must come from the platform.",
           );
-        if (resource === "feedback" && "response" in data) data.response = "";
+        if (resource === "feedback" && "response" in data) {
+          data.response = "";
+          data.responses = [];
+        }
         if (resource === "feedback" && "repairId" in data && data.repairId)
           await getRepair(ctx, data.repairId as string);
       } else {
@@ -1074,6 +1104,26 @@ export async function createResource(
             operationPermission(resource),
             true,
           );
+      }
+      if (x.tenancyId) {
+        const linked = await db.tenancy.findFirstOrThrow({
+          where: { id: x.tenancyId, organisationId: ctx.organisationId },
+        });
+        invariant(
+          !x.propertyId || x.propertyId === linked.propertyId,
+          422,
+          "Property and tenancy links must match.",
+        );
+        x.propertyId = linked.propertyId;
+      }
+      if (resource === "feedback" && "repairId" in data && data.repairId) {
+        const repair = await getRepair(ctx, data.repairId);
+        invariant(
+          !x.propertyId || x.propertyId === repair.property.id,
+          422,
+          "Feedback and repair must belong to the same property.",
+        );
+        x.propertyId = repair.property.id;
       }
       if (resource === "inventories" && "items" in data) {
         const docIds = (data.items as { documentIds: string[] }[]).flatMap(
@@ -1121,6 +1171,8 @@ export async function updateResource(
   raw: unknown,
 ) {
   const x = z.record(z.string(), z.unknown()).parse(raw);
+  if (resource === "feedback") return updateFeedback(ctx, id, raw);
+  if (resource === "units") return updateUnit(ctx, id, raw);
   if (resource === "properties") {
     await checkProperty(ctx, id);
     await entitlement(ctx, "core");
@@ -1145,7 +1197,23 @@ export async function updateResource(
       });
     } else {
       const data = propertySchema.partial().parse(raw);
-      await db.property.update({ where: { id }, data });
+      await validatePropertyChanges(ctx, data);
+      await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Property" WHERE id=${id} AND "organisationId"=${ctx.organisationId} FOR UPDATE`;
+        const before = await tx.property.findUniqueOrThrow({ where: { id } });
+        await tx.property.update({
+          where: { id },
+          data: {
+            ...data,
+            details: data.details
+              ? {
+                  ...(before.details as import("@/generated/prisma/client").Prisma.JsonObject),
+                  ...data.details,
+                }
+              : undefined,
+          },
+        });
+      });
     }
     await audit(ctx, "property.updated", "property", id);
     return { id };

@@ -10,16 +10,26 @@ import { authClient } from "@/lib/auth-client";
 import { permissions } from "@/lib/config";
 import type { Options } from "./record-form";
 import type { Row } from "./resource-table";
+import type {
+  WorkspaceSettings,
+  ProfilePreferences,
+} from "@/lib/workspace-settings";
 export function SettingsForm({
   name,
   organisationName,
   owner,
   emailUpdates,
+  profile,
+  workspaceSettings,
+  twoFactorEnabled,
 }: {
   name: string;
   organisationName: string;
   owner: boolean;
   emailUpdates: boolean;
+  profile: ProfilePreferences;
+  workspaceSettings: WorkspaceSettings;
+  twoFactorEnabled: boolean;
 }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -27,6 +37,7 @@ export function SettingsForm({
   const [preferenceError, setPreferenceError] = useState("");
   const [securityMessage, setSecurityMessage] = useState("");
   const [securityError, setSecurityError] = useState("");
+  const [operationsMessage, setOperationsMessage] = useState("");
   const router = useRouter();
   return (
     <>
@@ -34,9 +45,16 @@ export function SettingsForm({
         <ClientForm
           className="record-form"
           action={async (f) => {
+            setMessage("");
+            setError("");
             try {
               await requestJson("/api/settings", "PATCH", {
                 name: f.get("name"),
+                profile: {
+                  phone: f.get("phone"),
+                  preferredContact: f.get("preferredContact"),
+                  accessibilityNeeds: f.get("accessibilityNeeds"),
+                },
                 ...(owner
                   ? { organisationName: f.get("organisationName") }
                   : {}),
@@ -64,6 +82,40 @@ export function SettingsForm({
                 />
               </label>
             )}
+            <label className="form-field">
+              <span>Telephone</span>
+              <input
+                name="phone"
+                type="tel"
+                maxLength={30}
+                defaultValue={profile.phone}
+              />
+            </label>
+            <label className="form-field">
+              <span>Preferred contact method</span>
+              <select
+                name="preferredContact"
+                defaultValue={profile.preferredContact}
+              >
+                <option value="portal">Portal</option>
+                <option value="email">Email</option>
+                <option value="phone">Telephone</option>
+              </select>
+            </label>
+            <label className="form-field wide">
+              <span>Accessibility or communication needs</span>
+              <textarea
+                name="accessibilityNeeds"
+                maxLength={1000}
+                rows={3}
+                defaultValue={profile.accessibilityNeeds}
+              />
+              <small>
+                Optional. Keep your preferred format or communication needs on
+                record. Share relevant requirements with your landlord through a
+                private message.
+              </small>
+            </label>
           </div>
           <p className="muted">
             Default currency: GBP · Time zone: UTC · Dates: en-GB · Repair
@@ -86,6 +138,8 @@ export function SettingsForm({
         <ClientForm
           className="record-form"
           action={async (f) => {
+            setSecurityMessage("");
+            setSecurityError("");
             const r = await authClient.changePassword({
               currentPassword: String(f.get("current")),
               newPassword: String(f.get("new")),
@@ -133,7 +187,94 @@ export function SettingsForm({
           )}
         </ClientForm>
       </Panel>
-      <TwoFactorSetup />
+      {twoFactorEnabled ? (
+        <Panel title="Two-factor authentication">
+          <p className="record-form" role="status">
+            Two-factor authentication is enabled for your account.
+          </p>
+        </Panel>
+      ) : (
+        <TwoFactorSetup />
+      )}
+      {owner && (
+        <Panel
+          title="Repair safety & reminders"
+          subtitle="Emergency guidance is visible to tenants. The portal is not continuously monitored."
+        >
+          <ClientForm
+            className="record-form"
+            action={async (f) => {
+              setOperationsMessage("");
+              await requestJson("/api/settings", "PATCH", {
+                organisationSettings: {
+                  emergencyContact: f.get("emergencyContact"),
+                  emergencyGuidance: f.get("emergencyGuidance"),
+                  complianceReminderDays: Number(
+                    f.get("complianceReminderDays"),
+                  ),
+                  documentReminderDays: Number(f.get("documentReminderDays")),
+                },
+              });
+              setOperationsMessage("Repair safety and reminders saved.");
+              router.refresh();
+            }}
+          >
+            <label className="form-field">
+              <span>Landlord emergency contact</span>
+              <input
+                name="emergencyContact"
+                maxLength={200}
+                defaultValue={workspaceSettings.emergencyContact}
+              />
+            </label>
+            <label className="form-field">
+              <span>Property repair safety guidance</span>
+              <textarea
+                name="emergencyGuidance"
+                rows={4}
+                maxLength={3000}
+                defaultValue={workspaceSettings.emergencyGuidance}
+              />
+            </label>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>Compliance reminder lead time (days)</span>
+                <input
+                  name="complianceReminderDays"
+                  type="number"
+                  min={1}
+                  max={180}
+                  required
+                  defaultValue={workspaceSettings.complianceReminderDays}
+                />
+              </label>
+              <label className="form-field">
+                <span>Document reminder lead time (days)</span>
+                <input
+                  name="documentReminderDays"
+                  type="number"
+                  min={1}
+                  max={180}
+                  required
+                  defaultValue={workspaceSettings.documentReminderDays}
+                />
+              </label>
+            </div>
+            <p className="muted small">
+              Reminder lead times are administrative preferences, not statutory
+              deadlines.
+            </p>
+            <button className="button primary">
+              Save repair safety & reminders
+            </button>
+            {operationsMessage && (
+              <p className="success-message" role="status">
+                {operationsMessage}
+              </p>
+            )}
+          </ClientForm>
+        </Panel>
+      )}
       <Panel title="Notification preferences">
         <ClientForm
           className="record-form"

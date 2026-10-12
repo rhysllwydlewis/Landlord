@@ -1,5 +1,9 @@
 import Link from "next/link";
 import {
+  organisationSettings,
+  profilePreferences,
+} from "@/lib/workspace-settings";
+import {
   House,
   Wrench,
   CirclePoundSterling,
@@ -96,8 +100,19 @@ export async function SpecialModule({
     });
     const org = await db.organisation.findUniqueOrThrow({
       where: { id: ctx.organisationId },
-      select: { name: true },
+      select: { name: true, settings: true },
     });
+    const user = await db.user.findUniqueOrThrow({
+      where: { id: ctx.userId },
+      select: { twoFactorEnabled: true },
+    });
+    const ownTenant =
+      ctx.role === "TENANT"
+        ? await db.tenant.findFirst({
+            where: { userId: ctx.userId, organisationId: ctx.organisationId },
+            select: { phone: true },
+          })
+        : null;
     return (
       <>
         <PageHeader
@@ -117,6 +132,12 @@ export async function SpecialModule({
               name={ctx.name}
               organisationName={org.name}
               owner={ctx.role === "OWNER"}
+              profile={profilePreferences({
+                phone: ownTenant?.phone || "",
+                ...((preference?.data || {}) as Record<string, unknown>),
+              })}
+              workspaceSettings={organisationSettings(org.settings)}
+              twoFactorEnabled={!!user.twoFactorEnabled}
               emailUpdates={
                 (preference?.data as { email?: boolean } | undefined)?.email !==
                 false

@@ -12,8 +12,11 @@ import {
   FileText,
   House,
   Edit2,
+  Eye,
 } from "lucide-react";
 import { modules } from "@/lib/modules";
+import { FeedbackHistory, FeedbackResponse } from "./feedback-tools";
+import { DepositResponses } from "./deposit-responses";
 import {
   date,
   money,
@@ -24,11 +27,8 @@ import {
 import { requestJson } from "@/lib/http";
 import { Status, Empty } from "./ui";
 import { Modal, RecordForm, type Options } from "./record-form";
-export type Row = Record<string, unknown>;
-export const obj = (x: unknown) =>
-  x && typeof x === "object" ? (x as Row) : {};
-export const str = (x: unknown) =>
-  x === null || x === undefined ? "—" : String(x);
+import { obj, str, type Row } from "@/lib/records";
+export { obj, str, type Row } from "@/lib/records";
 function cell(row: Row, key: string) {
   const v = row[key];
   if (key === "property") return str(obj(v).name);
@@ -219,11 +219,31 @@ export function ResourceTable({
                     <>
                       <a
                         className="icon-button"
+                        aria-label={`Preview ${str(r.name)}`}
+                        href={`/api/documents/${r.id}?preview=1`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Eye size={17} />
+                      </a>
+                      <a
+                        className="icon-button"
                         aria-label={`Download ${str(r.name)}`}
                         href={`/api/documents/${r.id}`}
                       >
                         <Download size={17} />
                       </a>
+                      {editable && (
+                        <button
+                          className="button table-button"
+                          onClick={() => {
+                            setSelected(r);
+                            setMode("document-expiry");
+                          }}
+                        >
+                          Expiry
+                        </button>
+                      )}
                       {editable && (
                         <button
                           className="icon-button"
@@ -300,6 +320,15 @@ export function ResourceTable({
                       {r.reconciled ? "Unmatch" : "Reconcile"}
                     </button>
                   )}
+                  {resource === "payments" && (
+                    <Link
+                      className="button table-button"
+                      href={`/app/payments/${r.id}/receipt`}
+                      aria-label={`Receipt for ${str(r.reference)}`}
+                    >
+                      Receipt
+                    </Link>
+                  )}
                   {resource === "deposits" && editable && (
                     <a
                       className="icon-button"
@@ -308,6 +337,17 @@ export function ResourceTable({
                     >
                       <Download size={16} />
                     </a>
+                  )}
+                  {resource === "deposits" && (
+                    <button
+                      className="button table-button"
+                      onClick={() => {
+                        setSelected(r);
+                        setMode("deposit-responses");
+                      }}
+                    >
+                      View proposal & responses
+                    </button>
                   )}
                   {resource === "deposits" && editable && (
                     <button
@@ -394,11 +434,15 @@ export function ResourceTable({
           title={
             mode === "invite"
               ? "Invite tenant"
-              : mode === "share"
-                ? "Document sharing"
-                : mode === "deposit"
-                  ? "Deposit record"
-                  : str(selected.title)
+              : mode === "document-expiry"
+                ? "Document expiry"
+                : mode === "share"
+                  ? "Document sharing"
+                  : mode === "deposit-responses"
+                    ? "Deposit proposal & responses"
+                    : mode === "deposit"
+                      ? "Deposit record"
+                      : str(selected.title)
           }
           onClose={() => setSelected(null)}
         >
@@ -430,6 +474,39 @@ export function ResourceTable({
               <button className="button primary" disabled={busy}>
                 {busy ? "Sending…" : "Send invitation"}
               </button>
+            </ClientForm>
+          ) : mode === "deposit-responses" ? (
+            <DepositResponses id={str(selected.id)} tenant={tenant} />
+          ) : mode === "document-expiry" ? (
+            <ClientForm
+              className="record-form"
+              action={async (f) => {
+                await requestJson(
+                  `/api/documents/${selected.id}/metadata`,
+                  "PATCH",
+                  { expiresAt: f.get("expiresAt") || null },
+                );
+                setSelected(null);
+                router.refresh();
+              }}
+            >
+              <label className="form-field">
+                <span>Document expiry</span>
+                <input
+                  name="expiresAt"
+                  type="date"
+                  defaultValue={
+                    selected.expiresAt
+                      ? str(selected.expiresAt).slice(0, 10)
+                      : ""
+                  }
+                />
+                <small>
+                  Leave blank to remove the expiry. Reminders go to authorised
+                  document managers.
+                </small>
+              </label>
+              <button className="button primary">Save document expiry</button>
             </ClientForm>
           ) : mode === "share" ? (
             <ClientForm
@@ -537,6 +614,15 @@ export function ResourceTable({
           ) : (
             <div className="record-form">
               <OperationDetail resource={resource} row={selected} />
+              {!tenant && editable && resource === "feedback" && (
+                <FeedbackResponse
+                  row={selected}
+                  onSaved={() => {
+                    setSelected(null);
+                    router.refresh();
+                  }}
+                />
+              )}
               {tenant && resource === "inventories" && (
                 <ClientForm
                   className="inline-form"
@@ -560,7 +646,7 @@ export function ResourceTable({
                   </button>
                 </ClientForm>
               )}
-              {editable && (
+              {editable && (resource !== "feedback" || tenant) && (
                 <>
                   <hr />
                   <h3>Edit record</h3>
@@ -846,6 +932,7 @@ export function OperationDetail({
   row: Row;
 }) {
   const d = obj(row.data);
+  if (resource === "feedback") return <FeedbackHistory row={row} />;
   if (resource === "forecasts") {
     const f = forecast(d as ForecastInput);
     return (

@@ -64,7 +64,7 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-Playwright starts/reuses the local development server and uses the development seed. Tests create additional development records. It checks registration/verification/onboarding, landlord property/tenant/tenancy/payment creation, tenant invitation activation, tenant repair reporting with a photograph, repair conversation and resolution, private repair UI and direct API denial, selective sharing/revocation and mobile navigation.
+Playwright starts/reuses the local development server and uses the development seed. Tests create additional development records. It checks registration/verification/onboarding, landlord property/tenant/tenancy/payment creation, tenant invitation activation, tenant repair reporting with a photograph, repair conversation and resolution, private repair UI and direct API denial, selective sharing/revocation, property record and room updates, tenant preferences, repair feedback and responses, document expiry/previews, printable payment receipts, private deposit proposal responses and mobile navigation.
 
 The CI workflow repeats type, lint, unit, database, browser, build and dependency checks with disposable PostgreSQL data. CI credentials are disposable examples, not production accounts.
 
@@ -80,7 +80,7 @@ See [integration setup](docs/INTEGRATIONS.md), [architecture](docs/ARCHITECTURE.
 
 ## Administration
 
-Register and verify a normal account, enable two-factor authentication in Settings, then an authorised infrastructure operator may run:
+Register and verify a normal account, enable two-factor authentication at `/account/security` (also available from Settings), then an authorised infrastructure operator may run:
 
 ```sh
 npm run admin:grant -- your-existing-verified-email
@@ -94,4 +94,4 @@ This grants database-backed platform administrator access and records an audit e
 
 ## Repository delivery
 
-All source, migrations, tests, local setup and deployment documentation are committed. No secrets, uploaded files, generated accounts, runtime database contents or browser traces are committed. No site has been publicly deployed and no real-money payment has been processed.
+All source, migrations, tests, local setup and deployment documentation are committed. No secrets, uploaded files, generated accounts, runtime database contents or browser traces are committed. Deployments are operator-managed. This repository does not provision paid services or process tenant funds.

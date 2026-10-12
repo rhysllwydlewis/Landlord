@@ -5,9 +5,16 @@ import { outstanding, utcDay } from "@/lib/calculations";
 import { notify, managerIds } from "./notifications";
 import type { Context } from "./context";
 import { invariant } from "./errors";
-export async function schedule(now = new Date()) {
-  const orgs = await db.organisation.findMany({ where: { status: "active" } });
+import { organisationSettings } from "@/lib/workspace-settings";
+export async function schedule(now = new Date(), organisationId?: string) {
+  const orgs = await db.organisation.findMany({
+    where: {
+      status: "active",
+      ...(organisationId ? { id: organisationId } : {}),
+    },
+  });
   for (const org of orgs) {
+    const preferences = organisationSettings(org.settings);
     const ctx: Context = {
       organisationId: org.id,
       userId: "system",
@@ -25,21 +32,51 @@ export async function schedule(now = new Date()) {
       where: {
         organisationId: org.id,
         status: { not: "superseded" },
-        expiresAt: { lte: new Date(now.getTime() + 30 * 86400000) },
+        expiresAt: {
+          lte: new Date(
+            now.getTime() + preferences.complianceReminderDays * 86400000,
+          ),
+        },
       },
     });
     for (const c of compliance) {
       const days = Math.ceil(
         (c.expiresAt!.getTime() - now.getTime()) / 86400000,
       );
-      if (days <= 30)
+      if (days <= preferences.complianceReminderDays)
         await notify(
           org.id,
           await managerIds(ctx, "compliance", c.propertyId),
           "Compliance record needs review",
           "/app/compliance",
-          `compliance:${c.id}:${days > 7 ? "30" : days > 0 ? "7" : "expired"}`,
+          `compliance:${c.id}:${days > 7 ? String(preferences.complianceReminderDays) : days > 0 ? "7" : "expired"}`,
         );
+    }
+    const documents = await db.document.findMany({
+      where: {
+        organisationId: org.id,
+        archivedAt: null,
+        expiresAt: {
+          lte: new Date(
+            now.getTime() + preferences.documentReminderDays * 86400000,
+          ),
+        },
+        OR: [{ propertyId: null }, { property: { archivedAt: null } }],
+      },
+    });
+    for (const document of documents) {
+      const days = Math.ceil(
+        (document.expiresAt!.getTime() - now.getTime()) / 86400000,
+      );
+      await notify(
+        org.id,
+        await managerIds(ctx, "documents", document.propertyId || undefined),
+        "Document expiry needs review",
+        "/app/documents",
+        `document-expiry:${document.id}:${document.expiresAt!.toISOString().slice(0, 10)}:${days > 7 ? "upcoming" : days > 0 ? "near" : "expired"}`,
+        "document",
+        document.id,
+      );
     }
     const rent = await db.rentObligation.findMany({
       where: { organisationId: org.id, dueDate: { lt: utcDay(now) } },

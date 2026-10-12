@@ -2,6 +2,8 @@ import { db } from "./db";
 import { linkedPropertyScope, propertyScope, type Context } from "./context";
 import { repairWhere } from "./repairs";
 import { outstanding, anomalies, utcDay } from "@/lib/calculations";
+import { organisationSettings } from "@/lib/workspace-settings";
+import { availableUnitScope } from "./properties";
 export function can(ctx: Context, p: string) {
   return (
     ctx.role === "OWNER" ||
@@ -261,7 +263,10 @@ export async function options(ctx: Context) {
         select: {
           id: true,
           name: true,
-          units: { select: { id: true, name: true } },
+          units: {
+            where: availableUnitScope(ctx),
+            select: { id: true, name: true },
+          },
         },
       }),
       can(ctx, "tenants") ||
@@ -320,6 +325,7 @@ export async function options(ctx: Context) {
               reference: true,
               propertyId: true,
               unitId: true,
+              status: true,
             },
           })
         : [],
@@ -360,5 +366,31 @@ export async function options(ctx: Context) {
     repairs,
     documents,
     compliance,
+    portfolios: can(ctx, "properties")
+      ? await db.portfolio.findMany({
+          where: { organisationId: ctx.organisationId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : [],
+    owners: can(ctx, "properties")
+      ? await db.ownershipEntity.findMany({
+          where: { organisationId: ctx.organisationId },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        })
+      : [],
+    financeRead: can(ctx, "finance"),
+    financeWrite:
+      ctx.role === "OWNER" ||
+      (ctx.role === "STAFF" && ctx.permissions.includes("finance:write")),
+    repairGuidance: organisationSettings(
+      (
+        await db.organisation.findUniqueOrThrow({
+          where: { id: ctx.organisationId },
+          select: { settings: true },
+        })
+      ).settings,
+    ),
   };
 }
