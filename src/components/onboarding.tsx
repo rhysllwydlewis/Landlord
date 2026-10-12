@@ -146,6 +146,10 @@ export function Onboarding({
             </Link>
           </div>
         )}
+        <p className="muted small">
+          <Link href="/account/security">Account security</Link> — set up
+          two-factor authentication at any time.
+        </p>
       </div>
     </div>
   );

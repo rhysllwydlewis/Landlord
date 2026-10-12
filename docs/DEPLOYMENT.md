@@ -36,6 +36,8 @@ Use the repository root and the root `Dockerfile`. Keep the image's `npm start` 
 
 Use `npm run db:migrate` as a controlled pre-deploy command against that database. Do not seed production. Runtime credentials belong in service variables, not Docker build arguments. Public branding arguments are fixed at build time, so changes require rebuilding the image.
 
+If the homepage loads but `/api/health` returns `503`, the runtime database connectivity check (`SELECT 1`) is failing. Verify that the app service has `DATABASE_URL` referencing the intended Railway PostgreSQL service, both services are running in the same environment, and the database address is reachable from the app. Check private service logs for the connection error without sharing credentials. Redeploy after correcting service variables. A healthy connection returns `200` with `{"status":"ok"}`; this endpoint does not check whether migrations have been applied, so also confirm the pre-deploy migration command succeeds before registration.
+
 Validate the container locally before release:
 
 ```sh
@@ -61,6 +63,14 @@ Do not export live databases to developer laptops or use real customer data in s
 
 ## Operational access and rollout
 
-Register/verify the bootstrap administrator, enable TOTP, then use the audited infrastructure `admin:grant` command. Review production plans, price IDs and source-backed rules; development samples do not grant production entitlements. Enable providers only after test-mode verification. Establish support contacts, incident response, email failure monitoring and account suspension procedures.
+Bootstrap the first production administrator in this order:
+
+1. Configure the production database, authentication URLs, email delivery and scheduled worker, apply migrations, then register an account and verify its email.
+2. Open `/account/security` (also linked from onboarding). Set up an authenticator, save the private backup codes securely and verify a code. This protected page works without an organisation or subscription plan.
+3. In the running service's trusted shell, with its production environment and database, run `npm run admin:grant -- your-verified-email@example.com`. This audited command refuses unverified accounts or production accounts without enabled TOTP. Do not run development seeds in production.
+4. Sign in and open `/admin`. Create an active production plan with reviewed trial length, property/unit/staff/storage limits and feature entitlements. Development sample plans do not grant production entitlements. Stripe price identifiers are required before enabling paid checkout.
+5. Return to `/onboarding` and create the organisation. Test the landlord and tenant workflows with test data before inviting real customers.
+
+Review price IDs and source-backed rules; enable providers only after test-mode verification. Establish support contacts, incident response, email failure monitoring and account suspension procedures. Enabling TOTP alone never grants administrator access.
 
 The site must remain unpublished until the owner authorises deployment and the outstanding launch requirements are addressed. This documentation is a deployment workflow, not proof of a completed launch.
